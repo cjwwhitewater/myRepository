@@ -1,0 +1,45 @@
+# basic params
+global_frame: map
+robot_base_frame: base_scan
+update_frequency: 5.0
+publish_frequency: 2.0
+
+# map
+static_map: false
+rolling_window: true
+width: 150.0
+height: 150.0
+resolution: 0.1
+map_type: costmap
+
+# obstacles
+transform_tolerance: 0.2
+obstacle_range: 25 # after 7 meters there is a huge noise that is bad aqquracy for obstacles shape
+max_obstacle_height: 5.0
+raytrace_range: 15.0
+
+# example of the robot footprint
+footprint: [[-0.8, -0.4], [-0.8, 0.4], [0.8, 0.4], [0.8, -0.4]]  # 根据车辆实际尺寸调整足迹
+footprint_padding: 0.1  # 适当增加填充值，提高安全性
+
+# inflation and threshold
+inflation_radius: 0.5
+lethal_cost_threshold: 80
+
+
+# PointCloud2 topics
+
+observation_sources: static dynamic uncertain
+
+static: {sensor_frame: base_scan, data_type: PointCloud2, topic: static_obstacle, marking: true, clearing: true, max_obstacle_height: 30.0, min_obstacle_height: 0.1}
+
+dynamic: {sensor_frame: base_scan, data_type: PointCloud2, topic: dynamic_obstacle, marking: true, clearing: true, max_obstacle_height: 30.0, min_obstacle_height: 0.1}
+
+uncertain: {sensor_frame: base_scan, data_type: PointCloud2, topic: uncertain_obstacle, marking: true, clearing: true, max_obstacle_height: 30.0, min_obstacle_height: 0.1}
+
+track_unknown_space: true
+
+
+
+
+

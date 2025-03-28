@@ -1,0 +1,14 @@
+print: false # print config or not
+
+types:
+  - {name:   static,
+     value:  0,
+     group:  static_obstacle}
+
+  - {name:   dynamic,
+     value:  1,
+     group:  dynamic_obstacle}
+
+  - {name:   uncertain,
+     value:  2,
+     group:  uncertain_obstacle}     
