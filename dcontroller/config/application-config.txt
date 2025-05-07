@@ -1,0 +1,12 @@
+# Configuration file for program vcontroller.
+
+# port number for the Essential Text Protocol server (TCP based).
+--ETPServerPort    12345
+
+# port number for the Message Transferring Protocol server(UDP based).
+--MTPServerPort    20000
+
+
+# ==================================================
+# 以下是和调试相关的一些选项，用在软件开发、调试阶段
+# ==================================================

@@ -1,0 +1,2 @@
+sudo bin/dcontroller
+#gdb --args bin/dcontroller
