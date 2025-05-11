@@ -22,12 +22,12 @@ rsync -e $sshCommand -r --relative -avz cjw@$targetMachine:/usr/local/include   
 # ‘/usr/lib’, we could not figure out command options of rsync for this purpose. Thus, we synchronize 
 # all content of this directory. Of course, this operation will pull many libraries which are not 
 # used by our current 'drone' project.
-rsync -e $sshCommand -r --relative -avz zb@$targetMachine:/usr/lib                      $sysroot
-rsync -e $sshCommand -r --relative -avz zb@$targetMachine:/usr/local/lib                $sysroot
-rsync -e $sshCommand -r --relative -avz zb@$targetMachine:/lib/aarch64-linux-gnu/       $sysroot
+rsync -e $sshCommand -r --relative -avz cjw@$targetMachine:/usr/lib                      $sysroot
+rsync -e $sshCommand -r --relative -avz cjw@$targetMachine:/usr/local/lib                $sysroot
+rsync -e $sshCommand -r --relative -avz cjw@$targetMachine:/lib/aarch64-linux-gnu/       $sysroot
 
 # 小组内部使用的一些库
-rsync -e $sshCommand -r --relative -avz zb@$targetMachine:/usrLib  $sysroot
+rsync -e $sshCommand -r --relative -avz cjw@$targetMachine:/usrLib  $sysroot
 
 # 处理一些特殊的库
 # libc.so，解释参文档
