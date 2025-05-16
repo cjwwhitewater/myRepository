@@ -46,7 +46,7 @@ typedef struct {
 T_DjiReturnCode Osal_Socket(E_DjiSocketMode mode, T_DjiSocketHandle *socketHandle)
 {
     T_SocketHandleStruct *socketHandleStruct;
-    socklen_t optlen = sizeof(int);
+    socklen_t optlen = sizeof (int);
     int rcvBufSize = SOCKET_RECV_BUF_MAX_SIZE;
     int opt = 1;
 
@@ -135,16 +135,14 @@ T_DjiReturnCode Osal_Bind(T_DjiSocketHandle socketHandle, const char *ipAddr, ui
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 
-T_DjiReturnCode Osal_UdpSendData(T_DjiSocketHandle socketHandle,
-                                 const char *ipAddr, uint32_t port,
+T_DjiReturnCode Osal_UdpSendData(T_DjiSocketHandle socketHandle, const char *ipAddr, uint32_t port,
                                  const uint8_t *buf, uint32_t len, uint32_t *realLen)
 {
     struct sockaddr_in addr;
     T_SocketHandleStruct *socketHandleStruct = (T_SocketHandleStruct *) socketHandle;
     int32_t ret;
 
-    if ( socketHandle == nullptr || ipAddr == NULL || port == 0 || buf == NULL ||
-         len == 0 || realLen == NULL) {
+    if (socketHandle == NULL || ipAddr == NULL || port == 0 || buf == NULL || len == 0 || realLen == NULL) {
         return DJI_ERROR_SYSTEM_MODULE_CODE_INVALID_PARAMETER;
     }
 
@@ -214,13 +212,13 @@ T_DjiReturnCode Osal_TcpAccept(T_DjiSocketHandle socketHandle, char *ipAddr, uin
         return DJI_ERROR_SYSTEM_MODULE_CODE_INVALID_PARAMETER;
     }
 
-    outSocketHandleStruct =(T_SocketHandleStruct*)malloc(sizeof(T_SocketHandleStruct));
+    outSocketHandleStruct =
+            (T_SocketHandleStruct*)malloc(sizeof(T_SocketHandleStruct));
     if (outSocketHandleStruct == NULL) {
         return DJI_ERROR_SYSTEM_MODULE_CODE_MEMORY_ALLOC_FAILED;
     }
 
-    outSocketHandleStruct->socketFd = accept(socketHandleStruct->socketFd,
-                                             (struct sockaddr *) &addr, &addrLen);
+    outSocketHandleStruct->socketFd = accept(socketHandleStruct->socketFd, (struct sockaddr *) &addr, &addrLen);
     if (outSocketHandleStruct->socketFd < 0) {
         free(outSocketHandleStruct);
         return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;

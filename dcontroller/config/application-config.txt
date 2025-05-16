@@ -6,6 +6,9 @@
 # port number for the Message Transferring Protocol server(UDP based).
 --MTPServerPort    20000
 
+# If H30 is installed, set the following option. In some cases, H30 may be removed for safety purpose. 
+# In such situation, this options should be commented out.
+--cameraPresents
 
 # ==================================================
 # 以下是和调试相关的一些选项，用在软件开发、调试阶段

@@ -11,6 +11,8 @@ include(packagesForNano)
 # 以下命令是使用thread_pool库所要求的
 set(CMAKE_CXX_STANDARD 17)
 
+add_definitions(-DSYSTEM_ARCH_LINUX)
+
 # For the asio library, a higher version(1.12.2) should be used.
 createSimpleApplication("dcontroller"  "src"  
     "t_psdk;t_jsoncpp;t_options;boost_date_time;pthread;ssl;crypto;jetgpio;t_msgpack"

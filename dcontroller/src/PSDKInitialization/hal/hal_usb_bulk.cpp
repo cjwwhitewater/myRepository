@@ -115,7 +115,7 @@ T_DjiReturnCode HalUsbBulk_Init(T_DjiHalUsbBulkInfo usbBulkInfo, T_DjiUsbBulkHan
 
 T_DjiReturnCode HalUsbBulk_DeInit(T_DjiUsbBulkHandle usbBulkHandle)
 {
-    struct libusb_device_handle* handle = NULL;
+    struct libusb_device_handle *handle = NULL;
     T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
 
     if (usbBulkHandle == NULL) {
@@ -145,7 +145,7 @@ T_DjiReturnCode HalUsbBulk_WriteData(T_DjiUsbBulkHandle usbBulkHandle, const uin
 {
     int32_t ret;
     int32_t actualLen;
-    struct libusb_device_handle* handle = NULL;
+    struct libusb_device_handle *handle = NULL;
 
     if (usbBulkHandle == NULL) {
         return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
@@ -181,14 +181,14 @@ T_DjiReturnCode HalUsbBulk_ReadData(T_DjiUsbBulkHandle usbBulkHandle, uint8_t *b
                                     uint32_t *realLen)
 {
     int32_t ret;
-    struct libusb_device_handle* handle = NULL;
+    struct libusb_device_handle *handle = NULL;
     int32_t actualLen;
 
     if (usbBulkHandle == NULL) {
         return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
     }
 
-    handle = (libusb_device_handle*) ((T_HalUsbBulkObj *) usbBulkHandle)->handle;
+    handle = (libusb_device_handle *) ((T_HalUsbBulkObj *) usbBulkHandle)->handle;
 
     if (((T_HalUsbBulkObj *) usbBulkHandle)->usbBulkInfo.isUsbHost == true) {
 #ifdef LIBUSB_INSTALLED

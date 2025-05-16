@@ -33,14 +33,17 @@
 
 /* Private types -------------------------------------------------------------*/
 typedef struct {
-    int uartFd;
+    int32_t uartFd;
 } T_UartHandleStruct;
 
+/* Private values -------------------------------------------------------------*/
+
+/* Private functions declaration ---------------------------------------------*/
+
 /* Exported functions definition ---------------------------------------------*/
-T_DjiReturnCode HalUart_Init(E_DjiHalUartNum uartNum, uint32_t baudRate,
-                             T_DjiUartHandle *uartHandle)
+T_DjiReturnCode HalUart_Init(E_DjiHalUartNum uartNum, uint32_t baudRate, T_DjiUartHandle *uartHandle)
 {
-    T_UartHandleStruct *uartHandleStruct;
+    T_UartHandleStruct *uartHandleStruct = NULL;
     struct termios options;
     struct flock lock;
     T_DjiReturnCode returnCode = DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
@@ -50,7 +53,7 @@ T_DjiReturnCode HalUart_Init(E_DjiHalUartNum uartNum, uint32_t baudRate,
     char lineBuf[DJI_SYSTEM_RESULT_STR_MAX_SIZE] = {0};
     FILE *fp;
 
-    uartHandleStruct = (T_UartHandleStruct*) malloc(sizeof(T_UartHandleStruct));
+    uartHandleStruct = (T_UartHandleStruct*)malloc(sizeof(T_UartHandleStruct));
     if (uartHandleStruct == NULL) {
         return DJI_ERROR_SYSTEM_MODULE_CODE_MEMORY_ALLOC_FAILED;
     }
@@ -77,9 +80,8 @@ T_DjiReturnCode HalUart_Init(E_DjiHalUartNum uartNum, uint32_t baudRate,
 
     if (strstr(lineBuf, "crwxrwxrwx") == NULL) {
         USER_LOG_ERROR("Can't operation the device. "
-                   "Probably the device has not operation permission. "
-                   "Please execute command 'sudo chmod 777 %s' to add permission. ",
-                   uartName);
+                       "Probably the device has not operation permission. "
+                       "Please execute command 'sudo chmod 777 %s' to add permission. ", uartName);
         goto close_fp;
     }
 #else
@@ -90,9 +92,7 @@ T_DjiReturnCode HalUart_Init(E_DjiHalUartNum uartNum, uint32_t baudRate,
     }
 #endif
 
-    uartHandleStruct->uartFd = open(uartName,
-                                    (unsigned) O_RDWR | (unsigned) O_NOCTTY |
-                                    (unsigned) O_NDELAY);
+    uartHandleStruct->uartFd = open(uartName, (unsigned) O_RDWR | (unsigned) O_NOCTTY | (unsigned) O_NDELAY);
     if (uartHandleStruct->uartFd == -1) {
         goto close_fp;
     }
@@ -157,10 +157,8 @@ T_DjiReturnCode HalUart_Init(E_DjiHalUartNum uartNum, uint32_t baudRate,
     options.c_iflag &= ~(unsigned) INPCK;
     options.c_cflag &= ~(unsigned) CSTOPB;
     options.c_oflag &= ~(unsigned) OPOST;
-    options.c_lflag &= ~((unsigned) ICANON | (unsigned) ECHO | (unsigned) ECHOE |
-                         (unsigned) ISIG);
-    options.c_iflag &= ~((unsigned) BRKINT | (unsigned) ICRNL | (unsigned) INPCK |
-                         (unsigned) ISTRIP | (unsigned) IXON);
+    options.c_lflag &= ~((unsigned) ICANON | (unsigned) ECHO | (unsigned) ECHOE | (unsigned) ISIG);
+    options.c_iflag &= ~((unsigned) BRKINT | (unsigned) ICRNL | (unsigned) INPCK | (unsigned) ISTRIP | (unsigned) IXON);
     options.c_cc[VTIME] = 0;
     options.c_cc[VMIN] = 0;
 

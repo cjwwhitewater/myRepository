@@ -1,8 +1,6 @@
 /**
  ********************************************************************
  * @file    osal.h
- * @version V2.0.0
- * @date    2019/8/28
  * @brief   This is the header file for "osal.c", defining the structure and
  * (exported) function prototypes.
  *

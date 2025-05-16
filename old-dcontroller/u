@@ -1,0 +1,8 @@
+echo "running upload for dcontroller"
+./upload.fish
+
+echo "running upload for dtester"
+cd ../dtester
+./upload.fish
+
+cd ../dcontroller

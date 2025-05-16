@@ -4,7 +4,7 @@
 #include "options.h"
 #include "Attacker.h"
 #include <jetgpio.h>
-#include <unistd.h>
+#include "nanotimer.h"
 
 using namespace std;
 
@@ -16,26 +16,23 @@ Attacker::Attacker()
 
 Attacker::~Attacker()
 {
-    gpioPWM(pinNumber, 0);   // shutdown the motor when exit.
+    gpioWrite(pinNumber, 0);  // turn off the laser emitter when exit.
 }
 
-void Attacker::singleShot(int duration_ms)
+void Attacker::singleShot()
 {
     gpioWrite(pinNumber, 1);
-    usleep(duration_ms * 1000); // convert to microseconds
-    // cjwnote: 这里的usleep函数是一个阻塞函数，可能会导致其他线程无法执行。
+    millisecond_delay(1000);
     gpioWrite(pinNumber, 0);
 }
 
-void Attacker::multipleShots(int times, int duration_ms, int interval_ms)
+void Attacker::multipleShots()
 {
-    for (int i=0; i<times; i++){
+    for (int i=0; i<500; i++){
         gpioWrite(pinNumber, 1);
-        usleep(duration_ms * 1000);
+        millisecond_delay(1000);
         gpioWrite(pinNumber, 0);
-        if(i!=times-1){
-            usleep(interval_ms * 1000);
-        }
+        millisecond_delay(500);
     }
 }
 
