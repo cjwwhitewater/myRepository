@@ -35,18 +35,18 @@ cp /home/cjw/tools/nanoCross/specialNanoLibraries/libc.so     $sysroot/lib/aarch
 cp /home/cjw/tools/nanoCross/specialNanoLibraries/libc.so     $sysroot/usr/lib/aarch64-linux-gnu
 
 # libpthread
-cd $sysroot/lib/aarch64-linux-gnu
-unlink libpthread.so
-ln -rs libpthread.so.0 libpthread.so
-cd $sysroot/usr/lib/aarch64-linux-gnu
-unlink libpthread.so
-ln -rs libpthread.so.0 libpthread.so
+# cd $sysroot/lib/aarch64-linux-gnu
+# unlink libpthread.so
+# ln -rs libpthread.so.0 libpthread.so
+# cd $sysroot/usr/lib/aarch64-linux-gnu
+# unlink libpthread.so
+# # ln -rs libpthread.so.0 libpthread.so
 
 # dl库
-cd $sysroot/lib/aarch64-linux-gnu
-unlink libdl.so
-ln -rs libdl.so.2 libdl.so
+# cd $sysroot/lib/aarch64-linux-gnu
+# unlink libdl.so
+# ln -rs libdl.so.2 libdl.so
 
-cd $sysroot/usr/lib/aarch64-linux-gnu
-unlink libdl.so
-ln -rs libdl.so.2 libdl.so
+# cd $sysroot/usr/lib/aarch64-linux-gnu
+# unlink libdl.so
+# ln -rs libdl.so.2 libdl.so
