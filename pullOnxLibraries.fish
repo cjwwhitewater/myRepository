@@ -11,7 +11,7 @@ set sysroot '/home/cjw/x-tools/aarch64-nano-linux-gnu/aarch64-nano-linux-gnu/sys
 # The following setting are for accessing the nano machine via LAN (not frp)
 # ZhangBo can use the following lines.
 #set sshCommand     'ssh'
-#set targetMachine  'nano'
+#set targetMachine  'onx'
 
 # Header files.
 rsync -e $sshCommand -r --relative -avz cjw@$targetMachine:/usr/include                    $sysroot
