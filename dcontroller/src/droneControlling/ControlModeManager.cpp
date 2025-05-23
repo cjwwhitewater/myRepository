@@ -29,6 +29,9 @@ ControlModeManager::ControlModeManager()
   instructions["D26"] = D26;
   instructions["D27"] = D27;
   instructions["D28"] = D28;
+  instructions["D29"] = D29;
+  instructions["D30"] = D30;
+  instructions["D31"] = D31;
 }
 
 // runtime singleton
@@ -191,15 +194,18 @@ T_DjiReturnCode ControlModeManager::initialize()
   // 3. 等待获取有效GPS数据（循环获取直到成功或超时）
   T_DjiFcSubscriptionGpsPosition gpsPosition;
   int tryCount = 0;
-  const int tryMax = 100; // 最多等5秒
+  const int MAX_RETRY_COUNT = 100; // 最多等待5秒 (100 * 50ms = 5000ms)
+  const int RETRY_INTERVAL_MS = 50; // 每次重试间隔50ms
   bool gpsValid = false;
-  while (tryCount++ < tryMax)
+  
+  while (tryCount++ < MAX_RETRY_COUNT)
   {
     T_DjiReturnCode gpsRet = DjiFcSubscription_GetLatestValueOfTopic(
         DJI_FC_SUBSCRIPTION_TOPIC_GPS_POSITION,
         (uint8_t *)&gpsPosition,
         sizeof(T_DjiFcSubscriptionGpsPosition),
         NULL);
+    
     // 判断有效的纬度经度和返回码
     if (gpsRet == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS &&
         gpsPosition.y != 0 && gpsPosition.x != 0)
@@ -207,12 +213,13 @@ T_DjiReturnCode ControlModeManager::initialize()
       gpsValid = true;
       break;
     }
-    s_osalHandler->TaskSleepMs(50); // 等50ms再试
+    s_osalHandler->TaskSleepMs(RETRY_INTERVAL_MS);
   }
+  
   if (!gpsValid)
   {
-    USER_LOG_ERROR("Failed to get valid GPS position for RID info");
-    return DJI_ERROR_SYSTEM_MODULE_CODE_UNKNOWN;
+    USER_LOG_ERROR("Failed to get valid GPS position within timeout period");
+    return DJI_ERROR_SYSTEM_MODULE_CODE_TIMEOUT;
   }
 
   // 4. 用实时GPS数据初始化ridInfo
@@ -329,6 +336,12 @@ void ControlModeManager::FlightTakeoffAndLanding(int ID)
 
 void ControlModeManager::FlightControl_VelocityControl(T_DjiFlightControllerJoystickCommand command)
 {
+  // 建议增加速度限制检查
+  if (command.x > 10.0 || command.y > 10.0 || command.z > 10.0) {
+    USER_LOG_ERROR("Speed command exceeds limit");
+    return;
+  }
+
   T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
   {
@@ -588,14 +601,14 @@ std::vector<Waypoint> getWaypoints(const Json::Value &instructionParameter)
 // D8巡航
 void ControlModeManager::cruisePath(float speed, float arriveThresh)
 {
-  if (cruisePointCount < 1)
+  if (cruisePointCount < 1 || cruisePoints.empty())
   {
-    USER_LOG_ERROR("No cruise points set.\r\n");
+    USER_LOG_ERROR("No cruise points set or cruise points array is empty.\r\n");
     return;
   }
   else
   {
-    for (int i = 0; i < cruisePointCount; ++i)
+    for (int i = 0; i < cruisePointCount && i < cruisePoints.size(); ++i)
     {
       flyToTarget(cruisePoints[i], speed, arriveThresh);
     }
@@ -611,7 +624,14 @@ void ControlModeManager::goToTargetPoint(const Waypoint &target, float speed, fl
 void ControlModeManager::processInstruction(const Json::Value &instructionData)
 {
   string instructionID = instructionData["instructionID"].asString();
-  InstructionNames instruction = instructions.at(instructionID);
+  
+  // 检查指令ID是否存在
+  if (instructions.find(instructionID) == instructions.end()) {
+    USER_LOG_ERROR("Unknown instruction ID: %s", instructionID.c_str());
+    return;
+  }
+  
+  InstructionNames instruction = instructions[instructionID];
 
   switch (instruction)
   {
@@ -667,13 +687,15 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
   case D8: // 巡航
   {
     USER_LOG_INFO("Processing D8: Cruise");
-    float speed;
-    float arriveThresh;
-
-    cruisePoints = getWaypoints(instructionData["instructionParameter"]);
-    speed = instructionData["instructionParameter"]["speed"].asFloat();
-    arriveThresh = instructionData["instructionParameter"]["arriveThresh"].asFloat();
-
+    float speed = instructionData["instructionParameter"]["speed"].asFloat();
+    float arriveThresh = instructionData["instructionParameter"]["arriveThresh"].asFloat();
+            
+    // 不再从指令参数中获取路径点，而是使用已保存的路径点
+    if (cruisePoints.empty()) {
+        USER_LOG_ERROR("No waypoints saved for cruise");
+        return;
+    }
+            
     cruisePath(speed, arriveThresh);
     break;
   }
@@ -804,6 +826,23 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
       switchControlMode(LightControllingMode);
     break;
   }
+  case D29: // 保存路径点
+  {
+    Waypoint currentPos = getCurrentPosition();
+    saveWaypoint(currentPos);
+    break;
+  }
+  case D30: // 设置返航点
+  {
+    Waypoint currentPos = getCurrentPosition();
+    setHomePoint(currentPos);
+    break;
+  }
+  case D31: // 清除所有路径点
+  {
+    clearAllWaypoints();
+    break;
+  }
   }
 }
 
@@ -890,4 +929,38 @@ ControlModeManager *ControlModeManager::get()
 {
   assert(singleton);
   return singleton;
+}
+
+// 保存路径点
+void ControlModeManager::saveWaypoint(const Waypoint& waypoint)
+{
+    cruisePoints.push_back(waypoint);
+    USER_LOG_INFO("保存路径点成功，当前共有 %zu 个路径点", cruisePoints.size());
+}
+
+// 设置返航点
+void ControlModeManager::setHomePoint(const Waypoint& waypoint)
+{
+    homePoint = waypoint;
+    USER_LOG_INFO("设置返航点成功，位置：经度=%.6f，纬度=%.6f，高度=%.2f", 
+                  waypoint.longitude, waypoint.latitude, waypoint.altitude);
+}
+
+// 清除所有保存的路径点
+void ControlModeManager::clearAllWaypoints()
+{
+    cruisePoints.clear();
+    USER_LOG_INFO("已清除所有路径点");
+}
+
+// 获取所有保存的路径点
+const std::vector<Waypoint>& ControlModeManager::getSavedWaypoints() const
+{
+    return cruisePoints;
+}
+
+// 获取返航点
+const Waypoint& ControlModeManager::getHomePoint() const
+{
+    return homePoint;
 }
