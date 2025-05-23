@@ -18,6 +18,7 @@ set(SYSROOT_INCLUDE_DIRS
     ${CMAKE_SYSROOT}/usr/local/include
     ${CMAKE_SYSROOT}/include
     ${CMAKE_SYSROOT}/usrLib
+    ${CMAKE_SYSROOT}/usr/include/aarch64-linux-gnu/
 )
 set(SYSROOT_LIB_DIRS
     ${CMAKE_SYSROOT}/usr/lib
@@ -25,6 +26,8 @@ set(SYSROOT_LIB_DIRS
     ${CMAKE_SYSROOT}/lib/aarch64-linux-gnu
     ${CMAKE_SYSROOT}/lib
     ${CMAKE_SYSROOT}/usrLib
+    ${CMAKE_SYSROOT}/lib/aarch64-linux-gnu/tegra
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu
 )
 
 set(PSDK_INCLUDE_DIR "${CMAKE_SYSROOT}/usr/local/lib/psdk/include")
