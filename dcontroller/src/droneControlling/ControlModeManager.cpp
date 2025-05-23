@@ -34,6 +34,10 @@ ControlModeManager::ControlModeManager()
 // runtime singleton
 ControlModeManager *ControlModeManager::singleton = nullptr;
 
+T_DjiOsalHandler *ControlModeManager::s_osalHandler = nullptr;
+
+int cruisePointCount = 0; // 当前巡航点数量，全局变量
+
 ControlModeManager::~ControlModeManager()
 {
   T_DjiReturnCode returnCode;
@@ -51,21 +55,109 @@ bool ControlModeManager::canProcessInstruction(const string &instructionID)
   return instructions.count(instructionID) > 0;
 }
 
-void ControlModeManager::emergencyStop()
-{
-  // switchControlMode(InstructionFollowingMode);
-}
+// void ControlModeManager::emergencyStop()
+// {
+//   // switchControlMode(InstructionFollowingMode);
+// }
 
 Waypoint ControlModeManager::getCurrentPosition()
 {
   Waypoint pos;
-  _FlightControllerGpsInfo gpsInfo;
-  DjiFlightController_GetGpsInfo(&gpsInfo, 1000);
-  pos.latitude = gpsInfo.latitude / 1e7;   // 纬度
-  pos.longitude = gpsInfo.longitude / 1e7; // 经度
-  pos.altitude = gpsInfo.altitude;         // 高度
-  // pos.altitude = DjiUser_FlightControlGetValueOfRelativeHeight(); // 相对高度
+  T_DjiFcSubscriptionGpsPosition gpsPosition;
+  T_DjiReturnCode ret = DjiFcSubscription_GetLatestValueOfTopic(
+      DJI_FC_SUBSCRIPTION_TOPIC_GPS_POSITION,
+      (uint8_t *)&gpsPosition,
+      sizeof(T_DjiFcSubscriptionGpsPosition),
+      NULL);
+
+  if (ret == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+  {
+    pos.latitude = gpsPosition.y / 1e7;
+    pos.longitude = gpsPosition.x / 1e7;
+    pos.altitude = gpsPosition.z / 1000.0;
+  }
+  else
+  {
+    // 错误处理，设为0
+    pos.latitude = 0;
+    pos.longitude = 0;
+    pos.altitude = 0;
+  }
   return pos;
+}
+
+static T_DjiReturnCode
+DjiUser_FlightCtrlJoystickCtrlAuthSwitchEventCb(T_DjiFlightControllerJoystickCtrlAuthorityEventInfo eventData)
+{
+  switch (eventData.joystickCtrlAuthoritySwitchEvent)
+  {
+  case DJI_FLIGHT_CONTROLLER_MSDK_GET_JOYSTICK_CTRL_AUTH_EVENT:
+  {
+    if (eventData.curJoystickCtrlAuthority == DJI_FLIGHT_CONTROLLER_JOYSTICK_CTRL_AUTHORITY_MSDK)
+    {
+      USER_LOG_INFO("[Event] Msdk request to obtain joystick ctrl authority\r\n");
+    }
+    else
+    {
+      USER_LOG_INFO("[Event] Msdk request to release joystick ctrl authority\r\n");
+    }
+    break;
+  }
+  case DJI_FLIGHT_CONTROLLER_INTERNAL_GET_JOYSTICK_CTRL_AUTH_EVENT:
+  {
+    if (eventData.curJoystickCtrlAuthority == DJI_FLIGHT_CONTROLLER_JOYSTICK_CTRL_AUTHORITY_INTERNAL)
+    {
+      USER_LOG_INFO("[Event] Internal request to obtain joystick ctrl authority\r\n");
+    }
+    else
+    {
+      USER_LOG_INFO("[Event] Internal request to release joystick ctrl authority\r\n");
+    }
+    break;
+  }
+  case DJI_FLIGHT_CONTROLLER_OSDK_GET_JOYSTICK_CTRL_AUTH_EVENT:
+  {
+    if (eventData.curJoystickCtrlAuthority == DJI_FLIGHT_CONTROLLER_JOYSTICK_CTRL_AUTHORITY_OSDK)
+    {
+      USER_LOG_INFO("[Event] Request to obtain joystick ctrl authority\r\n");
+    }
+    else
+    {
+      USER_LOG_INFO("[Event] Request to release joystick ctrl authority\r\n");
+    }
+    break;
+  }
+  case DJI_FLIGHT_CONTROLLER_RC_LOST_GET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc due to rc lost\r\n");
+    break;
+  case DJI_FLIGHT_CONTROLLER_RC_NOT_P_MODE_RESET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc for rc is not in P mode\r\n");
+    break;
+  case DJI_FLIGHT_CONTROLLER_RC_SWITCH_MODE_GET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc due to rc switching mode\r\n");
+    break;
+  case DJI_FLIGHT_CONTROLLER_RC_PAUSE_GET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc due to rc pausing\r\n");
+    break;
+  case DJI_FLIGHT_CONTROLLER_RC_REQUEST_GO_HOME_GET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc due to rc request for return\r\n");
+    break;
+  case DJI_FLIGHT_CONTROLLER_LOW_BATTERY_GO_HOME_RESET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc for low battery return\r\n");
+    break;
+  case DJI_FLIGHT_CONTROLLER_LOW_BATTERY_LANDING_RESET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc for low battery land\r\n");
+    break;
+  case DJI_FLIGHT_CONTROLLER_OSDK_LOST_GET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc due to sdk lost\r\n");
+    break;
+  case DJI_FLIGHT_CONTROLLER_NERA_FLIGHT_BOUNDARY_RESET_JOYSTICK_CTRL_AUTH_EVENT:
+    USER_LOG_INFO("[Event] Current joystick ctrl authority is reset to rc due to near boundary\r\n");
+    break;
+  default:
+    USER_LOG_INFO("[Event] Unknown joystick ctrl authority event\r\n");
+  }
+  return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 
 T_DjiReturnCode ControlModeManager::initialize()
@@ -110,7 +202,7 @@ T_DjiReturnCode ControlModeManager::initialize()
         NULL);
     // 判断有效的纬度经度和返回码
     if (gpsRet == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS &&
-        gpsPosition.latitude != 0 && gpsPosition.longitude != 0)
+        gpsPosition.y != 0 && gpsPosition.x != 0)
     {
       gpsValid = true;
       break;
@@ -124,9 +216,9 @@ T_DjiReturnCode ControlModeManager::initialize()
   }
 
   // 4. 用实时GPS数据初始化ridInfo
-  ridInfo.latitude = gpsPosition.latitude / 10000000.0;
-  ridInfo.longitude = gpsPosition.longitude / 10000000.0;
-  ridInfo.altitude = gpsPosition.altitude;
+  ridInfo.latitude = gpsPosition.y / 10000000.0;
+  ridInfo.longitude = gpsPosition.x / 10000000.0;
+  ridInfo.altitude = gpsPosition.z;
 
   // 5. 初始化飞控
   returnCode = DjiFlightController_Init(ridInfo);
@@ -168,7 +260,7 @@ T_DjiReturnCode ControlModeManager::initialize()
 
   // 7. 注册遥控权回调
   returnCode = DjiFlightController_RegJoystickCtrlAuthorityEventCallback(
-      DjiTest_FlightControlJoystickCtrlAuthSwitchEventCallback);
+      DjiUser_FlightCtrlJoystickCtrlAuthSwitchEventCb);
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS &&
       returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_NONSUPPORT)
   {
@@ -179,7 +271,7 @@ T_DjiReturnCode ControlModeManager::initialize()
   return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 
-T_DjiReturnCode FlightControlDeInit(void)
+T_DjiReturnCode ControlModeManager::FlightControlDeInit()
 {
   T_DjiReturnCode returnCode;
 
@@ -214,16 +306,18 @@ void ControlModeManager::FlightTakeoffAndLanding(int ID)
   switch (ID)
   {
   case 1:
-    if (!DjiTest_FlightControlMonitoredTakeoff())
+    returnCode = DjiFlightController_StartTakeoff();
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
     {
-      USER_LOG_ERROR("Take off failed");
+      USER_LOG_ERROR("Take off failed, error code: 0x%08llX", returnCode);
       return;
     }
     USER_LOG_INFO("Successful take off\r\n");
   case 2:
-    if (!DjiTest_FlightControlMonitoredLanding())
+    returnCode = DjiFlightController_StartLanding();
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
     {
-      USER_LOG_ERROR("Landing failed");
+      USER_LOG_ERROR("Landing failed, error code: 0x%08llX", returnCode);
       return;
     }
     USER_LOG_INFO("Successful landing\r\n");
@@ -274,7 +368,7 @@ void ControlModeManager::FlightControl_setPitchAndYaw(T_DjiFlightControllerJoyst
       DJI_FLIGHT_CONTROLLER_HORIZONTAL_ANGLE_CONTROL_MODE,
       DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,
       DJI_FLIGHT_CONTROLLER_YAW_ANGLE_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_GROUND_COORDINATE,
+      DJI_FLIGHT_CONTROLLER_HORIZONTAL_BODY_COORDINATE,
       DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE};
   DjiFlightController_SetJoystickMode(joystickMode);
   USER_LOG_DEBUG("Joystick command: %.2f %.2f %.2f", command.x, command.y, command.z);
@@ -463,8 +557,8 @@ void ControlModeManager::flyToTarget(const Waypoint &target, float speed = 2.0f,
 std::vector<Waypoint> getWaypoints(const Json::Value &instructionParameter)
 {
   std::vector<Waypoint> waypoints;
-  const Json::Value &arr = instructionParameter["waypoints"];
   cruisePointCount = 0;
+  const Json::Value &arr = instructionParameter["waypoints"];
   if (!arr.isNull() && arr.isArray())
   {
     // 多点输入
@@ -501,7 +595,7 @@ void ControlModeManager::cruisePath(float speed, float arriveThresh)
   }
   else
   {
-    for (int i = 0; i < cruisePointCount && !stopAutoFlight; ++i)
+    for (int i = 0; i < cruisePointCount; ++i)
     {
       flyToTarget(cruisePoints[i], speed, arriveThresh);
     }
@@ -509,9 +603,9 @@ void ControlModeManager::cruisePath(float speed, float arriveThresh)
 }
 
 // D23飞行到目标点
-void ControlModeManager::goToTargetPoint(float speed, float arriveThresh)
+void ControlModeManager::goToTargetPoint(const Waypoint &target, float speed, float arriveThresh)
 {
-  flyToTarget(cruisePoints[0], speed, arriveThresh);
+  flyToTarget(target, speed, arriveThresh);
 }
 
 void ControlModeManager::processInstruction(const Json::Value &instructionData)
@@ -519,44 +613,59 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
   string instructionID = instructionData["instructionID"].asString();
   InstructionNames instruction = instructions.at(instructionID);
 
-  switch (instructionID)
+  switch (instruction)
   {
   case D1:
+  {
     USER_LOG_INFO("Processing D1: Takeoff");
     FlightTakeoffAndLanding(1);
     break;
+  }
   case D2:
+  {
     USER_LOG_INFO("Processing D2: Landing");
     FlightTakeoffAndLanding(2);
     break;
+  }
   case D3: // 前进
+  {
     USER_LOG_INFO("Processing D3: Move forward");
     T_DjiFlightControllerJoystickCommand cmd = {0};
     cmd.x = 0.5f;
     FlightControl_VelocityControl(cmd);
     break;
+  }
   case D4: // 后退
+  {
     USER_LOG_INFO("Processing D4: Move backward");
     T_DjiFlightControllerJoystickCommand cmd = {0};
-    cmd1.x = -0.5f;
+    cmd.x = -0.5f;
     FlightControl_VelocityControl(cmd);
     break;
+  }
   case D5: // 向左
+  {
     USER_LOG_INFO("Processing D5: Move left");
     T_DjiFlightControllerJoystickCommand cmd = {0};
     cmd.y = -0.5f;
     FlightControl_VelocityControl(cmd);
     break;
+  }
   case D6: // 向右
+  {
     USER_LOG_INFO("Processing D6: Move right");
     T_DjiFlightControllerJoystickCommand cmd = {0};
     cmd.y = 0.5f;
     FlightControl_VelocityControl(cmd);
     break;
+  }
   case D7:
+  {
     switchControlMode(HangingMode);
     break;
+  }
   case D8: // 巡航
+  {
     USER_LOG_INFO("Processing D8: Cruise");
     float speed;
     float arriveThresh;
@@ -567,7 +676,9 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
 
     cruisePath(speed, arriveThresh);
     break;
+  }
   case D9: // 设置前进速度
+  {
     USER_LOG_INFO("Processing D9: Set speed");
     float speed = instructionData["instructionParameter"].asFloat();
     if (speed > 5.0f)
@@ -578,18 +689,22 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
     cmd.x = speed;
     FlightControl_VelocityControl(cmd);
     break;
+  }
   case D10: // 设置前进加速度
+  {
     USER_LOG_INFO("Processing D10: Set acceleration");
-    float acceleration = instructionData["instructionParameter"]['acceleration'].asFloat();
-    float maxSpeed = instructionData["instructionParameter"]['maxSpeed'].asFloat();
-    if (acceleration > 5.0f)
-      acceleration = 5.0f;
+    float acceleration = instructionData["instructionParameter"]["acceleration"].asFloat();
+    float maxSpeed = instructionData["instructionParameter"]["maxSpeed"].asFloat();
+    if (acceleration > 0.5f)
+      acceleration = 0.5f;
     if (acceleration < 0.0f)
       acceleration = 0.0f; // 限制加速度范围
 
     setForwardAcceleration(acceleration, maxSpeed);
     break;
+  }
   case D11:
+  {
     USER_LOG_INFO("Processing D11: Set flight pitch");
     float pitchAngle = instructionData["instructionParameter"].asFloat();
     if (pitchAngle > 30.0f)
@@ -600,7 +715,9 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
     cmd.x = pitchAngle;
     FlightControl_setPitchAndYaw(cmd);
     break;
+  }
   case D13:
+  {
     USER_LOG_INFO("Processing D13: Set flight yaw");
     float yawAngle = instructionData["instructionParameter"].asFloat();
     if (yawAngle > 180.0f)
@@ -611,30 +728,36 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
     cmd.yaw = yawAngle;
     FlightControl_setPitchAndYaw(cmd);
     break;
+  }
   case D21: // 上升
+  {
     USER_LOG_INFO("Processing D21: Ascend");
     T_DjiFlightControllerJoystickCommand cmd = {0};
     cmd.z = 0.5f;
     FlightControl_VelocityControl(cmd);
     break;
-  case D22: // 下降
+  }
+  case D22: // 下降{
+  {
     USER_LOG_INFO("Processing D22: Descend");
     T_DjiFlightControllerJoystickCommand cmd = {0};
     cmd.z = -0.5f;
     FlightControl_VelocityControl(cmd);
     break;
+  }
   case D23: // 前往目标位置
+  {
     USER_LOG_INFO("Processing D23: Go to target point");
-    float speed;
-    float arriveThresh;
 
     cruisePoints = getWaypoints(instructionData["instructionParameter"]);
-    speed = instructionData["instructionParameter"]["speed"].asFloat();
-    arriveThresh = instructionData["instructionParameter"]["arriveThresh"].asFloat();
+    float speed = instructionData["instructionParameter"]["speed"].asFloat();
+    float arriveThresh = instructionData["instructionParameter"]["arriveThresh"].asFloat();
 
-    goToTargetPoint();
+    goToTargetPoint(cruisePoints[0], speed, arriveThresh);
     break;
+  }
   case D24: // 向左前方10°方向前进
+  {
     USER_LOG_INFO("Processing D24: Turn left");
     float angle = 10.0f * M_PI / 180.0f; // 弧度
     T_DjiFlightControllerJoystickCommand cmd = {0};
@@ -642,7 +765,9 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
     cmd.y = -0.5 * sin(angle);
     FlightControl_VelocityControl(cmd);
     break;
+  }
   case D25: // 向右前方10°方向前进
+  {
     USER_LOG_INFO("Processing D23: Turn right");
     float angle = -10.0f * M_PI / 180.0f;
     T_DjiFlightControllerJoystickCommand cmd = {0};
@@ -650,7 +775,9 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
     cmd.y = 0.5 * sin(angle);
     FlightControl_VelocityControl(cmd);
     break;
+  }
   case D26: // 返航
+  {
     USER_LOG_INFO("Processing D26: Return to home");
     T_DjiReturnCode returnCode = DjiFlightController_StartGoHome();
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
@@ -658,6 +785,7 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
       USER_LOG_ERROR("Return to home failed, error code: 0x%08X", returnCode);
     }
     break;
+  }
   case D27:
   {
     FanController *fanController = FanController::get();
@@ -688,17 +816,8 @@ void ControlModeManager::switchControlMode(ControlMode newMode)
   {
   case HangingMode:
   {
-    T_DjiReturnCode returnCode = DjiFlightController_ExecuteEmergencyBrakeAction();
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-    {
-      USER_LOG_ERROR("Emergency brake failed, error code: 0x%08X", returnCode);
-    }
-    s_osalHandler->TaskSleepMs(1000);
-    returnCode = DjiFlightController_CancelEmergencyBrakeAction();
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-    {
-      USER_LOG_ERROR("Cancel emergency brake action failed, error code: 0x%08X", returnCode);
-    }
+    emergencyBrake();
+    break;
   }
   case FanControllingMode:
   {

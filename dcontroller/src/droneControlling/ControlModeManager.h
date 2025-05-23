@@ -17,8 +17,17 @@ enum ControlMode {
     LightControllingMode
 };
 
+struct Waypoint {
+    double latitude;
+    double longitude;
+    float altitude;
+};
+
 class ControlModeManager{
 public:
+    T_DjiReturnCode initialize();
+    T_DjiReturnCode FlightControlDeInit();
+
     bool canProcessInstruction(const string& instructionID);
     void processInstruction(const Json::Value& instruction);
 
@@ -27,13 +36,25 @@ public:
     ControlMode getControlMode() const;
 
     // Called when futher occllision may happen.
-    void emergencyStop();
+    // void emergencyStop();
+
+    void FlightControl_VelocityControl(T_DjiFlightControllerJoystickCommand command);
+    void FlightControl_setPitchAndYaw(T_DjiFlightControllerJoystickCommand command);
+    void setForwardAcceleration(float acceleration, float maxSpeed, uint32_t durationMs);
+    void emergencyBrake();
+    void hover();
+    double calcDistance(const Waypoint &p1, const Waypoint &p2);
+    double calcHeading(const Waypoint &p1, const Waypoint &p2);
+    void flyToTarget(const Waypoint &target, float speed, float arriveThresh);
+    Waypoint getCurrentPosition();
+    void cruisePath(float speed, float arriveThresh);
+    void goToTargetPoint(const Waypoint& target, float speed, float arriveThresh);
 
 private:
     void switchControlMode(ControlMode newMode);
 
-    T_DjiReturnCode initialize();
-    T_DjiReturnCode FlightControlDeInit(void);
+    void FlightTakeoffAndLanding(int ID);
+
 private:
     ControlMode controlMode;
 
@@ -44,19 +65,14 @@ private:
     };
     std::map<string, InstructionNames> instructions;
 
-    static T_DjiOsalHandler *s_osalHandler = NULL;
+    static T_DjiOsalHandler *s_osalHandler;
 
-    struct Waypoint {
-        double latitude;
-        double longitude;
-        float altitude;
-    };
 
-    // 巡航点（最多三个）
-    Waypoint cruisePoints[3];
-    int cruisePointCount = 0;         // 当前巡航点数量
 
-    constexpr double EARTH_RADIUS = 6371000.0; // 地球半径，单位：米
+    // 巡航点
+    std::vector<Waypoint> cruisePoints;
+
+    static constexpr double EARTH_RADIUS = 6371000.0; // 地球半径，单位：米
 // runtime singleton
 public:
     static ControlModeManager* createInstance();
