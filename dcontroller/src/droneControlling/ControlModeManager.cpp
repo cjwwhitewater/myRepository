@@ -336,7 +336,7 @@ void ControlModeManager::FlightTakeoffAndLanding(int ID)
 
 void ControlModeManager::FlightControl_VelocityControl(T_DjiFlightControllerJoystickCommand command)
 {
-  // 建议增加速度限制检查
+  // 增加速度限制检查
   if (command.x > 10.0 || command.y > 10.0 || command.z > 10.0) {
     USER_LOG_ERROR("Speed command exceeds limit");
     return;
