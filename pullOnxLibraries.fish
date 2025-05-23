@@ -7,7 +7,7 @@
 set sshCommand     'ssh -oPort=8300'
 set targetMachine  '124.70.32.23'
 
-set sysroot '/home/cjw/x-tools/aarch64-nano-linux-gnu/aarch64-nano-linux-gnu/sysroot'
+set sysroot '/home/cjw/x-tools/aarch64-onx-linux-gnu/aarch64-onx-linux-gnu/sysroot'
 # The following setting are for accessing the nano machine via LAN (not frp)
 # ZhangBo can use the following lines.
 #set sshCommand     'ssh'
@@ -31,8 +31,8 @@ rsync -e $sshCommand -r --relative -avz cjw@$targetMachine:/usrLib  $sysroot
 
 # 处理一些特殊的库
 # libc.so，解释参文档
-cp /home/cjw/tools/nanoCross/specialNanoLibraries/libc.so     $sysroot/lib/aarch64-linux-gnu
-cp /home/cjw/tools/nanoCross/specialNanoLibraries/libc.so     $sysroot/usr/lib/aarch64-linux-gnu
+cp /home/cjw/tools/nanoCross/specialOnxLibraries/libc.so     $sysroot/lib/aarch64-linux-gnu
+cp /home/cjw/tools/nanoCross/specialOnxLibraries/libc.so     $sysroot/usr/lib/aarch64-linux-gnu
 
 # libpthread
 # cd $sysroot/lib/aarch64-linux-gnu

@@ -17,16 +17,18 @@ set(SYSROOT_INCLUDE_DIRS
     ${CMAKE_SYSROOT}/usr/include
     ${CMAKE_SYSROOT}/usr/local/include
     ${CMAKE_SYSROOT}/include
+    ${CMAKE_SYSROOT}/usrLib
 )
 set(SYSROOT_LIB_DIRS
     ${CMAKE_SYSROOT}/usr/lib
     ${CMAKE_SYSROOT}/usr/local/lib
     ${CMAKE_SYSROOT}/lib/aarch64-linux-gnu
     ${CMAKE_SYSROOT}/lib
+    ${CMAKE_SYSROOT}/usrLib
 )
 
 set(PSDK_INCLUDE_DIR "${CMAKE_SYSROOT}/usr/local/lib/psdk/include")
-set(PSDK_LIB_DIR "${CMAKE_SYSROOT}/usr/local/lib/psdk")
+set(PSDK_LIB_DIR "${CMAKE_SYSROOT}/usr/local/lib/psdk/lib/aarch64-linux-gnu-gcc")
 
 # jsoncpp
 find_and_add_library(JSONCPP jsoncpp/json/json.h "${SYSROOT_INCLUDE_DIRS}" jsoncpp "${SYSROOT_LIB_DIRS}")

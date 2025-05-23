@@ -5,9 +5,9 @@ project(dcontroller LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_SYSROOT /home/cjw/x-tools/aarch64-nano-linux-gnu/aarch64-nano-linux-gnu/sysroot)
+set(CMAKE_SYSROOT /home/cjw/x-tools/aarch64-onx-linux-gnu/aarch64-onx-linux-gnu/sysroot)
 
-include(/home/cjw/code/crossCompile/packagesForJetson.cmake)
+include(/home/cjw/work/myRepository/packagesForJetson.cmake)
 
 add_executable(dcontroller src/main.cpp
     src/droneControlling/ControlModeManager.cpp src/droneControlling/ControlModeManager.h src/droneControlling/HeartBeatProcessor.cpp src/droneControlling/HeartBeatProcessor.h
@@ -28,3 +28,4 @@ install(TARGETS dcontroller
 )
 
 
+# add_subdirectory(.)
