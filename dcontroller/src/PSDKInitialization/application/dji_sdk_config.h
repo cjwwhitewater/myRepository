@@ -52,8 +52,6 @@ extern "C" {
 
 #define CONFIG_MODULE_SAMPLE_GIMBAL_EMU_ON
 
-#define CONFIG_MODULE_SAMPLE_XPORT_ON
-
 #define CONFIG_MODULE_SAMPLE_WIDGET_ON
 
 #define CONFIG_MODULE_SAMPLE_WIDGET_SPEAKER_ON
@@ -65,10 +63,6 @@ extern "C" {
 #define CONFIG_MODULE_SAMPLE_HMS_CUSTOMIZATION_ON
 
 #define CONFIG_MODULE_SAMPLE_FC_SUBSCRIPTION_ON
-
-/*!< Attention: This function needs to be used together with mobile sdk mop sample.
-* */
-//#define CONFIG_MODULE_SAMPLE_MOP_CHANNEL_ON
 
 /* Exported types ------------------------------------------------------------*/
 

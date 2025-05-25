@@ -42,7 +42,7 @@ extern "C" {
 #ifdef PLATFORM_ARCH_x86_64
 #define LINUX_NETWORK_DEV           "enxf8e43b7bbc2c"
 #else
-#define LINUX_NETWORK_DEV           "eth1"
+#define LINUX_NETWORK_DEV           "enP8p1s0"
 #endif
 /**
  * @attention

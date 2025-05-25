@@ -38,7 +38,8 @@
 /* Private functions declaration ---------------------------------------------*/
 
 /* Exported functions definition ---------------------------------------------*/
-T_DjiReturnCode HalNetWork_Init(const char *ipAddr, const char *netMask, T_DjiNetworkHandle *halObj)
+T_DjiReturnCode HalNetWork_Init(const char *ipAddr, const char *netMask,
+                                T_DjiNetworkHandle *halObj)
 {
     int32_t ret;
     char cmdStr[LINUX_CMD_STR_MAX_SIZE];
@@ -51,8 +52,17 @@ T_DjiReturnCode HalNetWork_Init(const char *ipAddr, const char *netMask, T_DjiNe
         return DJI_ERROR_SYSTEM_MODULE_CODE_INVALID_PARAMETER;
     }
 
-    sscanf(ipAddr, "%d.%d.%d.%d", &routeIp[0], &routeIp[1], &routeIp[2], &routeIp[3]);
-    sscanf(netMask, "%d.%d.%d.%d", &genMask[0], &genMask[1], &genMask[2], &genMask[3]);
+    sscanf(ipAddr, "%d.%d.%d.%d",
+           &routeIp[0], &routeIp[1], &routeIp[2], &routeIp[3]);
+
+    // Forcely set the netmask to the following value, overriding
+    // the value of "255.255.0.0" of the function parameter specified
+    // by the PSDK higher modules. For explanation, see doc
+    // "更改PSDK样例中对网络掩码的设置".
+    netMask = "255.255.255.0";    
+
+    sscanf(netMask, "%d.%d.%d.%d",
+           &genMask[0], &genMask[1], &genMask[2], &genMask[3]);
     routeIp[0] &= genMask[0];
     routeIp[1] &= genMask[1];
     routeIp[2] &= genMask[2];
@@ -71,7 +81,8 @@ T_DjiReturnCode HalNetWork_Init(const char *ipAddr, const char *netMask, T_DjiNe
         return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
     }
 
-    snprintf(cmdStr, sizeof(cmdStr), "ifconfig %s %s netmask %s", LINUX_NETWORK_DEV, ipAddr, netMask);
+    snprintf(cmdStr, sizeof(cmdStr), "ifconfig %s %s netmask %s",
+             LINUX_NETWORK_DEV, ipAddr, netMask);
     USER_LOG_DEBUG("%s", cmdStr);
     ret = system(cmdStr);
     if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
@@ -89,8 +100,10 @@ T_DjiReturnCode HalNetWork_Init(const char *ipAddr, const char *netMask, T_DjiNe
         return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
     }
 
-    snprintf(cmdStr, sizeof(cmdStr), "route add -net %d.%d.%d.%d netmask %s dev %s",
-        routeIp[0], routeIp[1], routeIp[2], routeIp[3], netMask, LINUX_NETWORK_DEV);
+    snprintf(cmdStr, sizeof(cmdStr),
+             "route add -net %d.%d.%d.%d netmask %s dev %s",
+             routeIp[0], routeIp[1], routeIp[2], routeIp[3], netMask,
+             LINUX_NETWORK_DEV);
     USER_LOG_DEBUG("%s", cmdStr);
     ret = system(cmdStr);
     if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {

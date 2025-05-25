@@ -50,7 +50,7 @@
 /* Private types -------------------------------------------------------------*/
 typedef struct {
     E_DjiCameraType cameraType;
-    char *cameraTypeStr;
+    const char *cameraTypeStr;
 } T_DjiTestCameraTypeStr;
 
 /* Private values -------------------------------------------------------------*/

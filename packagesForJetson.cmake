@@ -43,6 +43,9 @@ find_and_add_library(JETGPIO jetgpio.h "${SYSROOT_INCLUDE_DIRS}" jetgpio "${SYSR
 find_and_add_library(OPTIONS options/options.h "${SYSROOT_INCLUDE_DIRS}" options "${SYSROOT_LIB_DIRS}")
 include_directories(${OPTIONS_INCLUDE_DIR}/options)
 
+#fmt
+find_and_add_library(FMT fmt/format.h "${SYSROOT_INCLUDE_DIRS}" fmt "${SYSROOT_LIB_DIRS}")
+
 #psdk
 find_library(PAYLOADSDK_LIB payloadsdk PATHS ${PSDK_LIB_DIR})
 

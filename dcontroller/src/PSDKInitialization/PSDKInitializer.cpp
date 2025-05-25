@@ -84,24 +84,27 @@ int initializePSDK(int argc, char **argv)
     USER_UTIL_UNUSED(argc);
     USER_UTIL_UNUSED(argv);
 
-    // attention: when the program is hand up ctrl-c will generate the coredump file
+    // attention: when the program is hand up ctrl-c will generate the
+    // coredump file
     signal(SIGTERM, DjiUser_NormalExitHandler);
 
-    /*!< Step 1: Prepare system environment, such as osal, hal uart, console function and so on. */
+    //Step 1: Prepare system environment, such as osal, hal uart, console
+    //function and so on.
     returnCode = DjiUser_PrepareSystemEnvironment();
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("Prepare system environment error");
         return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
     }
 
-    /*!< Step 2: Fill your application information in dji_sdk_app_info.h and use this interface to fill it. */
+    // Step 2: Fill your application information in dji_sdk_app_info.h and
+    // use this interface to fill it.
     returnCode = DjiUser_FillInUserInfo(&userInfo);
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("Fill user info error, please check user info config");
         return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
     }
 
-    /*!< Step 3: Initialize the Payload SDK core by your application information. */
+    //Step 3: Initialize the Payload SDK core by your application information.
     returnCode = DjiCore_Init(&userInfo);
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("Core init error");
@@ -119,9 +122,11 @@ int initializePSDK(int argc, char **argv)
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("get aircraft version info error");
     } else {
-        USER_LOG_INFO("Aircraft version is V%02d.%02d.%02d.%02d", aircraftInfoVersion.majorVersion,
-                        aircraftInfoVersion.minorVersion, aircraftInfoVersion.modifyVersion,
-                        aircraftInfoVersion.debugVersion);
+        USER_LOG_INFO("Aircraft version is V%02d.%02d.%02d.%02d",
+                      aircraftInfoVersion.majorVersion,
+                      aircraftInfoVersion.minorVersion,
+                      aircraftInfoVersion.modifyVersion,
+                      aircraftInfoVersion.debugVersion);
     }
 
     returnCode = DjiCore_SetAlias("PSDK_APPALIAS");
@@ -142,8 +147,8 @@ int initializePSDK(int argc, char **argv)
         return DJI_ERROR_SYSTEM_MODULE_CODE_SYSTEM_ERROR;
     }
 
-    /*!< Step 4: Initialize the selected modules by macros in dji_sdk_config.h . */
-#ifdef CONFIG_MODULE_SAMPLE_POWER_MANAGEMENT_ON
+    // Step 4: Initialize the selected modules by macros in dji_sdk_config.h.
+    #ifdef CONFIG_MODULE_SAMPLE_POWER_MANAGEMENT_ON
     T_DjiTestApplyHighPowerHandler applyHighPowerHandler = {
         .pinInit = DjiTest_HighPowerApplyPinInit,
         .pinWrite = DjiTest_WriteHighPowerApplyPin,
@@ -158,14 +163,14 @@ int initializePSDK(int argc, char **argv)
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("power management init error");
     }
-#endif
+    #endif
 
-#ifdef CONFIG_MODULE_SAMPLE_DATA_TRANSMISSION_ON
+    #ifdef CONFIG_MODULE_SAMPLE_DATA_TRANSMISSION_ON
     returnCode = DjiTest_DataTransmissionStartService();
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("data tramsmission sample init error");
     }
-#endif
+    #endif
 
     if (aircraftInfoBaseInfo.mountPosition == DJI_MOUNT_POSITION_EXTENSION_PORT &&
         (aircraftInfoBaseInfo.aircraftType == DJI_AIRCRAFT_TYPE_M300_RTK ||
@@ -180,81 +185,57 @@ int initializePSDK(int argc, char **argv)
             USER_LOG_ERROR("widget speaker test init error");
         }
     } else {
-#ifdef CONFIG_MODULE_SAMPLE_CAMERA_EMU_ON
+        #ifdef CONFIG_MODULE_SAMPLE_CAMERA_EMU_ON
         returnCode = DjiTest_CameraEmuBaseStartService();
         if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
             USER_LOG_ERROR("camera emu common init error");
         }
-#endif
+        #endif
 
-#ifdef CONFIG_MODULE_SAMPLE_CAMERA_MEDIA_ON
+        #ifdef CONFIG_MODULE_SAMPLE_CAMERA_MEDIA_ON
         returnCode = DjiTest_CameraEmuMediaStartService();
         if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
             USER_LOG_ERROR("camera emu media init error");
         }
-#endif
+        #endif
 
-#ifdef CONFIG_MODULE_SAMPLE_FC_SUBSCRIPTION_ON
+        #ifdef CONFIG_MODULE_SAMPLE_FC_SUBSCRIPTION_ON
         returnCode = DjiTest_FcSubscriptionStartService();
         if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
             USER_LOG_ERROR("data subscription sample init error\n");
         }
-#endif
+        #endif
 
-#ifdef CONFIG_MODULE_SAMPLE_GIMBAL_EMU_ON
-        if (aircraftInfoBaseInfo.djiAdapterType == DJI_SDK_ADAPTER_TYPE_SKYPORT_V2 ||
-            aircraftInfoBaseInfo.djiAdapterType == DJI_SDK_ADAPTER_TYPE_NONE) {
-            if (DjiTest_GimbalStartService() != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+        #ifdef CONFIG_MODULE_SAMPLE_GIMBAL_EMU_ON
+        if (aircraftInfoBaseInfo.djiAdapterType == DJI_SDK_ADAPTER_TYPE_SKYPORT_V2
+           || aircraftInfoBaseInfo.djiAdapterType == DJI_SDK_ADAPTER_TYPE_NONE) {
+            if (DjiTest_GimbalStartService() !=
+                    DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS){
                 USER_LOG_ERROR("psdk gimbal init error");
             }
         }
-#endif
+        #endif
 
-#ifdef CONFIG_MODULE_SAMPLE_XPORT_ON
-        if (aircraftInfoBaseInfo.djiAdapterType == DJI_SDK_ADAPTER_TYPE_XPORT) {
-            if (DjiTest_XPortStartService() != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-                USER_LOG_ERROR("psdk xport init error");
-            }
-        }
-#endif
+        #ifdef CONFIG_MODULE_SAMPLE_WIDGET_ON
+        #if DJI_USE_WIDGET_INTERACTION
+                returnCode = DjiTest_WidgetInteractionStartService();
+                if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+                    USER_LOG_ERROR("widget interaction test init error");
+                }
+        #else
+                returnCode = DjiTest_WidgetStartService();
+                if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+                    USER_LOG_ERROR("widget sample init error");
+                }
+        #endif
+        #endif
 
-#ifdef CONFIG_MODULE_SAMPLE_WIDGET_ON
-#if DJI_USE_WIDGET_INTERACTION
-        returnCode = DjiTest_WidgetInteractionStartService();
-        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("widget interaction test init error");
-        }
-#else
-        returnCode = DjiTest_WidgetStartService();
-        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("widget sample init error");
-        }
-#endif
-#endif
-
-#ifdef CONFIG_MODULE_SAMPLE_WIDGET_SPEAKER_ON
-        returnCode = DjiTest_WidgetSpeakerStartService();
-        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("widget speaker test init error");
-        }
-#endif
-
-#ifdef CONFIG_MODULE_SAMPLE_MOP_CHANNEL_ON
-        returnCode = DjiTest_MopChannelStartService();
-        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("mop channel sample init error");
-        }
-#endif
-
-#ifdef CONFIG_MODULE_SAMPLE_PAYLOAD_COLLABORATION_ON
-        if (aircraftInfoBaseInfo.djiAdapterType == DJI_SDK_ADAPTER_TYPE_SKYPORT_V2 ||
-            aircraftInfoBaseInfo.djiAdapterType == DJI_SDK_ADAPTER_TYPE_XPORT) {
-            returnCode = DjiTest_PayloadCollaborationStartService();
-            if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-                USER_LOG_ERROR("Payload collaboration sample init error\n");
-            }
-        }
-#endif
+        #ifdef CONFIG_MODULE_SAMPLE_WIDGET_SPEAKER_ON
+                returnCode = DjiTest_WidgetSpeakerStartService();
+                if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+                    USER_LOG_ERROR("widget speaker test init error");
+                }
+        #endif
 
 #ifdef CONFIG_MODULE_SAMPLE_UPGRADE_ON
         T_DjiTestUpgradePlatformOpt linuxUpgradePlatformOpt = {
@@ -280,15 +261,15 @@ int initializePSDK(int argc, char **argv)
         }
 #endif
 
-#ifdef CONFIG_MODULE_SAMPLE_HMS_CUSTOMIZATION_ON
-        returnCode = DjiTest_HmsCustomizationStartService();
-        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-            USER_LOG_ERROR("hms test init error");
-        }
-#endif
+        #ifdef CONFIG_MODULE_SAMPLE_HMS_CUSTOMIZATION_ON
+                returnCode = DjiTest_HmsCustomizationStartService();
+                if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+                    USER_LOG_ERROR("hms test init error");
+                }
+        #endif
     }
 
-    /*!< Step 5: Tell the DJI Pilot you are ready. */
+    // Step 5: Tell the DJI Pilot you are ready.
     returnCode = DjiCore_ApplicationStart();
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("start sdk application error");

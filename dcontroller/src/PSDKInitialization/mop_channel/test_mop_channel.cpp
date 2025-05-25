@@ -658,7 +658,7 @@ static void *DjiTest_MopChannelFileServiceRecvTask(void *arg)
                 DjiMopChannel_Destroy(s_fileServiceContent[clientNum].clientHandle);
             }
         } else {
-            if (&recvRealLen > 0) {
+            if (recvRealLen > 0) {
                 T_DjiMopChannel_FileTransfor *fileTransfor = (T_DjiMopChannel_FileTransfor *) recvBuf;
 
                 switch (fileTransfor->cmd) {
