@@ -2,8 +2,6 @@
 #include <iostream>
 #include "options.h"
 #include "ControlModeManager.h"
-#include "../gpioManipulators/FanController.h"
-#include "../gpioManipulators/LightController.h"
 
 using namespace std;
 
@@ -27,8 +25,6 @@ ControlModeManager::ControlModeManager()
   instructions["D24"] = D24;
   instructions["D25"] = D25;
   instructions["D26"] = D26;
-  instructions["D27"] = D27;
-  instructions["D28"] = D28;
   instructions["D29"] = D29;
   instructions["D30"] = D30;
   instructions["D31"] = D31;
@@ -49,7 +45,7 @@ ControlModeManager::~ControlModeManager()
   {
     USER_LOG_ERROR("Deinit flight controller module failed, error code:0x%08llX",
                    returnCode);
-    return;
+    // 继续执行，确保所有资源都被释放
   }
 }
 
@@ -194,10 +190,10 @@ T_DjiReturnCode ControlModeManager::initialize()
   // 3. 等待获取有效GPS数据（循环获取直到成功或超时）
   T_DjiFcSubscriptionGpsPosition gpsPosition;
   int tryCount = 0;
-  const int MAX_RETRY_COUNT = 100; // 最多等待5秒 (100 * 50ms = 5000ms)
+  const int MAX_RETRY_COUNT = 100;  // 最多等待5秒 (100 * 50ms = 5000ms)
   const int RETRY_INTERVAL_MS = 50; // 每次重试间隔50ms
   bool gpsValid = false;
-  
+
   while (tryCount++ < MAX_RETRY_COUNT)
   {
     T_DjiReturnCode gpsRet = DjiFcSubscription_GetLatestValueOfTopic(
@@ -205,7 +201,7 @@ T_DjiReturnCode ControlModeManager::initialize()
         (uint8_t *)&gpsPosition,
         sizeof(T_DjiFcSubscriptionGpsPosition),
         NULL);
-    
+
     // 判断有效的纬度经度和返回码
     if (gpsRet == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS &&
         gpsPosition.y != 0 && gpsPosition.x != 0)
@@ -215,7 +211,7 @@ T_DjiReturnCode ControlModeManager::initialize()
     }
     s_osalHandler->TaskSleepMs(RETRY_INTERVAL_MS);
   }
-  
+
   if (!gpsValid)
   {
     USER_LOG_ERROR("Failed to get valid GPS position within timeout period");
@@ -249,6 +245,8 @@ T_DjiReturnCode ControlModeManager::initialize()
       {DJI_FC_SUBSCRIPTION_TOPIC_POSITION_FUSED, DJI_DATA_SUBSCRIPTION_TOPIC_50_HZ, "position fused"},
       {DJI_FC_SUBSCRIPTION_TOPIC_ALTITUDE_FUSED, DJI_DATA_SUBSCRIPTION_TOPIC_50_HZ, "altitude fused"},
       {DJI_FC_SUBSCRIPTION_TOPIC_ALTITUDE_OF_HOMEPOINT, DJI_DATA_SUBSCRIPTION_TOPIC_1_HZ, "altitude of home point"},
+      {DJI_FC_SUBSCRIPTION_TOPIC_POSITION_VO, DJI_DATA_SUBSCRIPTION_TOPIC_10_HZ, "position vo"},
+      {DJI_FC_SUBSCRIPTION_TOPIC_CONTROL_DEVICE, DJI_DATA_SUBSCRIPTION_TOPIC_5_HZ, "control device"},
   };
 
   for (size_t i = 0; i < sizeof(topics) / sizeof(topics[0]); ++i)
@@ -275,6 +273,14 @@ T_DjiReturnCode ControlModeManager::initialize()
     return returnCode;
   }
 
+  T_DjiFlightControllerGeneralInfo generalInfo = {0};
+  returnCode = DjiFlightController_GetGeneralInfo(&generalInfo);
+  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+    USER_LOG_ERROR("Get general info failed, error code:0x%08llX", returnCode);
+    return returnCode;
+  }
+  USER_LOG_INFO("Get aircraft serial number is: %s", generalInfo.serialNum);
+
   return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 
@@ -282,6 +288,7 @@ T_DjiReturnCode ControlModeManager::FlightControlDeInit()
 {
   T_DjiReturnCode returnCode;
 
+  // 1. 先反初始化订阅模块
   returnCode = DjiFcSubscription_DeInit();
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
   {
@@ -290,6 +297,7 @@ T_DjiReturnCode ControlModeManager::FlightControlDeInit()
     return returnCode;
   }
 
+  // 2. 再反初始化飞控
   returnCode = DjiFlightController_DeInit();
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
   {
@@ -301,96 +309,356 @@ T_DjiReturnCode ControlModeManager::FlightControlDeInit()
   return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
 }
 
-void ControlModeManager::FlightTakeoffAndLanding(int ID)
+bool ControlModeManager::FlightTakeoffAndLanding(int ID)
 {
   T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
   {
     USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
-    return;
+    return false;
   }
   s_osalHandler->TaskSleepMs(1000);
+
   switch (ID)
   {
-  case 1:
+  case 1: // 起飞
+  {
+    // 1. 开始起飞
     returnCode = DjiFlightController_StartTakeoff();
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
     {
       USER_LOG_ERROR("Take off failed, error code: 0x%08llX", returnCode);
-      return;
+      return false;
     }
-    USER_LOG_INFO("Successful take off\r\n");
-  case 2:
+
+    // 2. 检查电机是否启动
+    if (!MotorStartedCheck())
+    {
+      USER_LOG_ERROR("Takeoff failed. Motors are not spinning.");
+      return false;
+    }
+    USER_LOG_INFO("Motors spinning...");
+
+    // 3. 检查是否离地
+    if (!TakeOffInAirCheck())
+    {
+      USER_LOG_ERROR("Takeoff failed. Aircraft is still on the ground, but the motors are spinning");
+      return false;
+    }
+    USER_LOG_INFO("Ascending...");
+
+    // 4. 检查起飞是否完成
+    if (!TakeoffFinishedCheck())
+    {
+      USER_LOG_ERROR("Takeoff finished, but the aircraft is in an unexpected mode. Please connect DJI GO.");
+      return false;
+    }
+    USER_LOG_INFO("Successful take off");
+    return true;
+  }
+  case 2: // 降落
+  {
+    // 1. 开始降落
     returnCode = DjiFlightController_StartLanding();
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
     {
-      USER_LOG_ERROR("Landing failed, error code: 0x%08llX", returnCode);
-      return;
+        USER_LOG_ERROR("Landing failed, error code: 0x%08llX", returnCode);
+        return false;
     }
-    USER_LOG_INFO("Successful landing\r\n");
-    break;
-  default:
-    break;
+
+    // 2. 检查降落是否开始
+    if (!CheckActionStarted(DJI_FC_SUBSCRIPTION_DISPLAY_MODE_AUTO_LANDING))
+    {
+        USER_LOG_ERROR("Fail to execute Landing action!");
+        return false;
+    }
+
+    // 3. 检查降落是否完成
+    if (!LandFinishedCheck())
+    {
+        USER_LOG_ERROR("Landing finished, but the aircraft is in an unexpected mode. Please connect DJI Assistant.");
+        return false;
+    }
+
+    USER_LOG_INFO("Successful landing");
+    return true;
   }
+  default:
+    return false;
+  }
+}
+
+// 检查电机是否成功启动，超时时间2秒
+bool ControlModeManager::MotorStartedCheck()
+{
+  int motorsNotStarted = 0;
+  int timeoutCycles = 20;  // 2秒超时 (20 * 100ms)
+
+  while (true) {
+    T_DjiFcSubscriptionFlightStatus flightStatus = {0};
+    T_DjiFcSubscriptionDisplaymode displayMode = {0};
+    
+    T_DjiReturnCode returnCode = DjiFcSubscription_GetLatestValueOfTopic(
+        DJI_FC_SUBSCRIPTION_TOPIC_STATUS_FLIGHT,
+        (uint8_t *)&flightStatus,
+        sizeof(T_DjiFcSubscriptionFlightStatus),
+        NULL);
+    
+    if (returnCode == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+      returnCode = DjiFcSubscription_GetLatestValueOfTopic(
+          DJI_FC_SUBSCRIPTION_TOPIC_STATUS_DISPLAYMODE,
+          (uint8_t *)&displayMode,
+          sizeof(T_DjiFcSubscriptionDisplaymode),
+          NULL);
+    }
+
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+      USER_LOG_ERROR("Get value of topic flight status error, error code: 0x%08X", returnCode);
+      return false;
+    }
+
+    // 检查是否满足启动条件
+    if (flightStatus == DJI_FC_SUBSCRIPTION_FLIGHT_STATUS_ON_GROUND ||
+        displayMode == DJI_FC_SUBSCRIPTION_DISPLAY_MODE_ENGINE_START) {
+      return true;
+    }
+
+    motorsNotStarted++;
+    if (motorsNotStarted >= timeoutCycles) {
+      return false;
+    }
+    
+    s_osalHandler->TaskSleepMs(100);
+  }
+}
+
+// 检查无人机是否成功离地，超时时间11秒
+bool ControlModeManager::TakeOffInAirCheck()
+{
+  int stillOnGround = 0;
+  int timeoutCycles = 110;  // 11秒超时 (110 * 100ms)
+
+  while (true) {
+    T_DjiFcSubscriptionFlightStatus flightStatus = {0};
+    T_DjiFcSubscriptionDisplaymode displayMode = {0};
+    
+    T_DjiReturnCode returnCode = DjiFcSubscription_GetLatestValueOfTopic(
+        DJI_FC_SUBSCRIPTION_TOPIC_STATUS_FLIGHT,
+        (uint8_t *)&flightStatus,
+        sizeof(T_DjiFcSubscriptionFlightStatus),
+        NULL);
+    
+    if (returnCode == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+      returnCode = DjiFcSubscription_GetLatestValueOfTopic(
+          DJI_FC_SUBSCRIPTION_TOPIC_STATUS_DISPLAYMODE,
+          (uint8_t *)&displayMode,
+          sizeof(T_DjiFcSubscriptionDisplaymode),
+          NULL);
+    }
+
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+      USER_LOG_ERROR("Get value of topic flight status error, error code: 0x%08X", returnCode);
+      return false;
+    }
+
+    // 检查是否满足离地条件
+    if (flightStatus == DJI_FC_SUBSCRIPTION_FLIGHT_STATUS_IN_AIR ||
+        (displayMode == DJI_FC_SUBSCRIPTION_DISPLAY_MODE_ASSISTED_TAKEOFF ||
+         displayMode == DJI_FC_SUBSCRIPTION_DISPLAY_MODE_AUTO_TAKEOFF)) {
+      return true;
+    }
+
+    stillOnGround++;
+    if (stillOnGround >= timeoutCycles) {
+      return false;
+    }
+    
+    s_osalHandler->TaskSleepMs(100);
+  }
+}
+
+// 检查起飞是否完成并进入正常飞行模式
+bool ControlModeManager::TakeoffFinishedCheck()
+{
+    while (true) {
+        T_DjiFcSubscriptionDisplaymode displayMode = {0};
+        T_DjiReturnCode returnCode = DjiFcSubscription_GetLatestValueOfTopic(
+            DJI_FC_SUBSCRIPTION_TOPIC_STATUS_DISPLAYMODE,
+            (uint8_t *)&displayMode,
+            sizeof(T_DjiFcSubscriptionDisplaymode),
+            NULL);
+
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            return false;
+        }
+
+        // 如果仍在起飞模式，继续等待
+        if (displayMode == DJI_FC_SUBSCRIPTION_DISPLAY_MODE_AUTO_TAKEOFF ||
+            displayMode == DJI_FC_SUBSCRIPTION_DISPLAY_MODE_ASSISTED_TAKEOFF) {
+            s_osalHandler->TaskSleepMs(1000);
+            continue;
+        }
+
+        // 检查是否进入正常飞行模式
+        return (displayMode == DJI_FC_SUBSCRIPTION_DISPLAY_MODE_P_GPS ||
+                displayMode == DJI_FC_SUBSCRIPTION_DISPLAY_MODE_ATTITUDE);
+    }
+}
+
+// 检查降落是否完成
+bool ControlModeManager::LandFinishedCheck()
+{
+    while (true) {
+        T_DjiFcSubscriptionDisplaymode displayMode = {0};
+        T_DjiFcSubscriptionFlightStatus flightStatus = {0};
+        
+        T_DjiReturnCode returnCode = DjiFcSubscription_GetLatestValueOfTopic(
+            DJI_FC_SUBSCRIPTION_TOPIC_STATUS_DISPLAYMODE,
+            (uint8_t *)&displayMode,
+            sizeof(T_DjiFcSubscriptionDisplaymode),
+            NULL);
+            
+        if (returnCode == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            returnCode = DjiFcSubscription_GetLatestValueOfTopic(
+                DJI_FC_SUBSCRIPTION_TOPIC_STATUS_FLIGHT,
+                (uint8_t *)&flightStatus,
+                sizeof(T_DjiFcSubscriptionFlightStatus),
+                NULL);
+        }
+
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            return false;
+        }
+
+        // 如果仍在降落模式或仍在空中，继续等待
+        if (displayMode == DJI_FC_SUBSCRIPTION_DISPLAY_MODE_AUTO_LANDING ||
+            flightStatus == DJI_FC_SUBSCRIPTION_FLIGHT_STATUS_IN_AIR) {
+            s_osalHandler->TaskSleepMs(1000);
+            continue;
+        }
+
+        // 检查是否已降落（不在P-GPS或ATTITUDE模式）
+        return (displayMode != DJI_FC_SUBSCRIPTION_DISPLAY_MODE_P_GPS &&
+                displayMode != DJI_FC_SUBSCRIPTION_DISPLAY_MODE_ATTITUDE);
+    }
+}
+
+// 检查动作是否开始
+bool ControlModeManager::CheckActionStarted(E_DjiFcSubscriptionDisplayMode mode)
+{
+    int actionNotStarted = 0;
+    int timeoutCycles = 20;  // 2秒超时
+
+    while (true) {
+        T_DjiFcSubscriptionDisplaymode displayMode = {0};
+        T_DjiReturnCode returnCode = DjiFcSubscription_GetLatestValueOfTopic(
+            DJI_FC_SUBSCRIPTION_TOPIC_STATUS_DISPLAYMODE,
+            (uint8_t *)&displayMode,
+            sizeof(T_DjiFcSubscriptionDisplaymode),
+            NULL);
+
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+            return false;
+        }
+
+        if (displayMode == mode) {
+            USER_LOG_INFO("Now flight is in mode: %d", mode);
+            return true;
+        }
+
+        actionNotStarted++;
+        if (actionNotStarted >= timeoutCycles) {
+            USER_LOG_ERROR("Action start failed, current mode: %d, expected mode: %d", 
+                          displayMode, mode);
+            return false;
+        }
+        
+        s_osalHandler->TaskSleepMs(100);
+    }
 }
 
 void ControlModeManager::FlightControl_VelocityControl(T_DjiFlightControllerJoystickCommand command)
 {
-  // 增加速度限制检查
-  if (command.x > 10.0 || command.y > 10.0 || command.z > 10.0) {
-    USER_LOG_ERROR("Speed command exceeds limit");
-    return;
-  }
+    // 速度限制检查
+    if (command.x > 10.0 || command.y > 10.0 || command.z > 10.0)
+    {
+        USER_LOG_ERROR("Speed command exceeds limit");
+        return;
+    }
 
-  T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
-  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
-    return;
-  }
-  s_osalHandler->TaskSleepMs(1000);
+    // 获取控制权限
+    T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+    {
+        USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
+        return;
+    }
+    s_osalHandler->TaskSleepMs(1000);
 
-  T_DjiFlightControllerJoystickMode joystickMode = {
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_VELOCITY_CONTROL_MODE, // 水平速度控制
-      DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,   // 垂直速度控制
-      DJI_FLIGHT_CONTROLLER_YAW_ANGLE_RATE_CONTROL_MODE,      // 航向角速度控制
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_BODY_COORDINATE,       // 无人机本体为坐标系
-      DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE,       // 稳定控制模式
-  };
-  DjiFlightController_SetJoystickMode(joystickMode);
-  USER_LOG_DEBUG("Joystick command: %.2f %.2f %.2f", command.x, command.y, command.z);
-  returnCode = DjiFlightController_ExecuteJoystickAction(command);
-  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Execute joystick command failed, errno = 0x%08llX", returnCode);
-    return;
-  }
+    // 设置控制模式
+    T_DjiFlightControllerJoystickMode joystickMode = {
+        DJI_FLIGHT_CONTROLLER_HORIZONTAL_VELOCITY_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_YAW_ANGLE_RATE_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_HORIZONTAL_BODY_COORDINATE,
+        DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE,
+    };
+    DjiFlightController_SetJoystickMode(joystickMode);
+
+    // 停止之前的控制
+    stopControl();  // 确保之前的控制已停止
+
+    // 设置新的控制命令
+    currentCommand = command;
+    isControlling = true;
+
+    // 启动新的控制线程
+    if (controlThread.joinable()) {
+        controlThread.join();  // 等待之前的线程结束
+    }
+    controlThread = std::thread(&ControlModeManager::controlLoop, this);
 }
 
 void ControlModeManager::FlightControl_setPitchAndYaw(T_DjiFlightControllerJoystickCommand command)
 {
-  T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
-  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
-    return;
-  }
-  s_osalHandler->TaskSleepMs(1000);
+    // 角度限制检查
+    if (command.x > 30.0f || command.x < -10.0f || command.yaw > 180.0f || command.yaw < -180.0f)
+    {
+        USER_LOG_ERROR("Angle command exceeds limit");
+        return;
+    }
 
-  T_DjiFlightControllerJoystickMode joystickMode = {
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_ANGLE_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_YAW_ANGLE_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_BODY_COORDINATE,
-      DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE};
-  DjiFlightController_SetJoystickMode(joystickMode);
-  USER_LOG_DEBUG("Joystick command: %.2f %.2f %.2f", command.x, command.y, command.z);
-  returnCode = DjiFlightController_ExecuteJoystickAction(command);
-  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Execute joystick command failed, errno = 0x%08llX", returnCode);
-    return;
-  }
+    // 获取控制权限
+    T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+    {
+        USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
+        return;
+    }
+    s_osalHandler->TaskSleepMs(1000);
+
+    // 设置控制模式
+    T_DjiFlightControllerJoystickMode joystickMode = {
+        DJI_FLIGHT_CONTROLLER_HORIZONTAL_ANGLE_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_YAW_ANGLE_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_HORIZONTAL_BODY_COORDINATE,
+        DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE,
+    };
+    DjiFlightController_SetJoystickMode(joystickMode);
+
+    // 停止之前的控制
+    stopControl();  // 确保之前的控制已停止
+
+    // 设置新的控制命令
+    currentCommand = command;
+    isControlling = true;
+
+    // 启动新的控制线程
+    if (controlThread.joinable()) {
+        controlThread.join();  // 等待之前的线程结束
+    }
+    controlThread = std::thread(&ControlModeManager::controlLoop, this);
 }
 
 void ControlModeManager::setForwardAcceleration(float acceleration, float maxSpeed = 5.0f, uint32_t durationMs = 10 * 1000)
@@ -436,26 +704,29 @@ void ControlModeManager::setForwardAcceleration(float acceleration, float maxSpe
 
 void ControlModeManager::emergencyBrake() // 急停，优先级高
 {
-  T_DjiReturnCode ret = DjiFlightController_ObtainJoystickCtrlAuthority();
-  if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", ret);
-    return;
-  }
+    // 停止控制循环
+    stopControl();
 
-  ret = DjiFlightController_ExecuteEmergencyBrakeAction();
-  if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Emergency brake failed, error code: 0x%08X", ret);
-  }
+    T_DjiReturnCode ret = DjiFlightController_ObtainJoystickCtrlAuthority();
+    if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+    {
+        USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", ret);
+        return;
+    }
 
-  s_osalHandler->TaskSleepMs(1000);
+    ret = DjiFlightController_ExecuteEmergencyBrakeAction();
+    if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+    {
+        USER_LOG_ERROR("Emergency brake failed, error code: 0x%08X", ret);
+    }
 
-  ret = DjiFlightController_CancelEmergencyBrakeAction();
-  if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Cancel emergency brake action failed, error code: 0x%08X", ret);
-  }
+    s_osalHandler->TaskSleepMs(1000);
+
+    ret = DjiFlightController_CancelEmergencyBrakeAction();
+    if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+    {
+        USER_LOG_ERROR("Cancel emergency brake action failed, error code: 0x%08X", ret);
+    }
 }
 
 void ControlModeManager::hover() // 悬停而非急停，优先级可能较低，暂未使用
@@ -624,13 +895,14 @@ void ControlModeManager::goToTargetPoint(const Waypoint &target, float speed, fl
 void ControlModeManager::processInstruction(const Json::Value &instructionData)
 {
   string instructionID = instructionData["instructionID"].asString();
-  
+
   // 检查指令ID是否存在
-  if (instructions.find(instructionID) == instructions.end()) {
+  if (instructions.find(instructionID) == instructions.end())
+  {
     USER_LOG_ERROR("Unknown instruction ID: %s", instructionID.c_str());
     return;
   }
-  
+
   InstructionNames instruction = instructions[instructionID];
 
   switch (instruction)
@@ -689,13 +961,14 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
     USER_LOG_INFO("Processing D8: Cruise");
     float speed = instructionData["instructionParameter"]["speed"].asFloat();
     float arriveThresh = instructionData["instructionParameter"]["arriveThresh"].asFloat();
-            
+
     // 不再从指令参数中获取路径点，而是使用已保存的路径点
-    if (cruisePoints.empty()) {
-        USER_LOG_ERROR("No waypoints saved for cruise");
-        return;
+    if (cruisePoints.empty())
+    {
+      USER_LOG_ERROR("No waypoints saved for cruise");
+      return;
     }
-            
+
     cruisePath(speed, arriveThresh);
     break;
   }
@@ -755,23 +1028,28 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
   {
     USER_LOG_INFO("Processing D21: Ascend");
     T_DjiFlightControllerJoystickCommand cmd = {0};
-    cmd.z = 0.5f;
-    FlightControl_VelocityControl(cmd);
-    break;
-  }
-  case D22: // 下降{
-  {
-    USER_LOG_INFO("Processing D22: Descend");
-    T_DjiFlightControllerJoystickCommand cmd = {0};
     cmd.z = -0.5f;
     FlightControl_VelocityControl(cmd);
     break;
   }
-  case D23: // 前往目标位置
+  case D22: // 下降
+  {
+    USER_LOG_INFO("Processing D22: Descend");
+    T_DjiFlightControllerJoystickCommand cmd = {0};
+    cmd.z = 0.5f;
+    FlightControl_VelocityControl(cmd);
+    break;
+  }
+  case D23: // 前往目标位置（下一个目标点）
   {
     USER_LOG_INFO("Processing D23: Go to target point");
 
-    cruisePoints = getWaypoints(instructionData["instructionParameter"]);
+    if (cruisePoints.empty())
+    {
+      USER_LOG_ERROR("No waypoints saved for target point");
+      return;
+    }
+
     float speed = instructionData["instructionParameter"]["speed"].asFloat();
     float arriveThresh = instructionData["instructionParameter"]["arriveThresh"].asFloat();
 
@@ -808,24 +1086,6 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
     }
     break;
   }
-  case D27:
-  {
-    FanController *fanController = FanController::get();
-    int gear = instructionData["instructionParameter"].asInt();
-    fanController->setGear(gear);
-    if (controlMode != FanControllingMode)
-      switchControlMode(FanControllingMode);
-    break;
-  }
-  case D28:
-  {
-    LightController *lightController = LightController::get();
-    int brightness = instructionData["instructionParameter"].asInt();
-    lightController->setBrightness(brightness);
-    if (controlMode != LightControllingMode)
-      switchControlMode(LightControllingMode);
-    break;
-  }
   case D29: // 保存路径点
   {
     Waypoint currentPos = getCurrentPosition();
@@ -856,18 +1116,6 @@ void ControlModeManager::switchControlMode(ControlMode newMode)
   case HangingMode:
   {
     emergencyBrake();
-    break;
-  }
-  case FanControllingMode:
-  {
-    FanController *fanController = FanController::get();
-    fanController->setGear(0);
-    break;
-  }
-  case LightControllingMode:
-  {
-    LightController *lightController = LightController::get();
-    lightController->setBrightness(0);
     break;
   }
   case UnspecifiedMode:
@@ -932,35 +1180,65 @@ ControlModeManager *ControlModeManager::get()
 }
 
 // 保存路径点
-void ControlModeManager::saveWaypoint(const Waypoint& waypoint)
+void ControlModeManager::saveWaypoint(const Waypoint &waypoint)
 {
-    cruisePoints.push_back(waypoint);
-    USER_LOG_INFO("保存路径点成功，当前共有 %zu 个路径点", cruisePoints.size());
+  cruisePoints.push_back(waypoint);
+  USER_LOG_INFO("保存路径点成功，当前共有 %zu 个路径点", cruisePoints.size());
 }
 
 // 设置返航点
-void ControlModeManager::setHomePoint(const Waypoint& waypoint)
+void ControlModeManager::setHomePoint(const Waypoint &waypoint)
 {
-    homePoint = waypoint;
-    USER_LOG_INFO("设置返航点成功，位置：经度=%.6f，纬度=%.6f，高度=%.2f", 
-                  waypoint.longitude, waypoint.latitude, waypoint.altitude);
+  homePoint = waypoint;
+  USER_LOG_INFO("设置返航点成功，位置：经度=%.6f，纬度=%.6f，高度=%.2f",
+                waypoint.longitude, waypoint.latitude, waypoint.altitude);
 }
 
 // 清除所有保存的路径点
 void ControlModeManager::clearAllWaypoints()
 {
-    cruisePoints.clear();
-    USER_LOG_INFO("已清除所有路径点");
+  cruisePoints.clear();
+  USER_LOG_INFO("已清除所有路径点");
 }
 
 // 获取所有保存的路径点
-const std::vector<Waypoint>& ControlModeManager::getSavedWaypoints() const
+const std::vector<Waypoint> &ControlModeManager::getSavedWaypoints() const
 {
-    return cruisePoints;
+  return cruisePoints;
 }
 
 // 获取返航点
-const Waypoint& ControlModeManager::getHomePoint() const
+const Waypoint &ControlModeManager::getHomePoint() const
 {
-    return homePoint;
+  return homePoint;
+}
+
+void ControlModeManager::controlLoop()
+{
+    USER_LOG_INFO("Control loop started");
+    while (isControlling) {
+        T_DjiReturnCode returnCode = DjiFlightController_ExecuteJoystickAction(currentCommand);
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+        {
+            USER_LOG_ERROR("Execute joystick command failed, errno = 0x%08llX", returnCode);
+            isControlling = false;
+            return;
+        }
+        s_osalHandler->TaskSleepMs(2);
+    }
+    USER_LOG_INFO("Control loop stopped");
+}
+
+void ControlModeManager::stopControl()
+{
+    if (!isControlling) {
+        return;  // 如果已经停止，直接返回
+    }
+    
+    USER_LOG_INFO("Stopping control loop");
+    isControlling = false;
+    if (controlThread.joinable()) {
+        controlThread.join();
+    }
+    USER_LOG_INFO("Control loop stopped");
 }

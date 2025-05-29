@@ -7,14 +7,14 @@
 #include "dji_platform.h"
 #include "dji_typedef.h"
 #include <cmath>
+#include <thread>
+#include <atomic>
 
 using std::string;
 
 enum ControlMode {
     UnspecifiedMode,
-    HangingMode,
-    FanControllingMode,
-    LightControllingMode
+    HangingMode
 };
 
 struct Waypoint {
@@ -54,7 +54,7 @@ public:
     void cruisePath(float speed, float arriveThresh);
     void goToTargetPoint(const Waypoint& target, float speed, float arriveThresh);
 
-    // 修改路径点相关函数
+    // 设置路径点相关函数
     void saveWaypoint(const Waypoint& waypoint);
     void setHomePoint(const Waypoint& waypoint);
     void clearAllWaypoints();
@@ -64,7 +64,7 @@ public:
 private:
     void switchControlMode(ControlMode newMode);
 
-    void FlightTakeoffAndLanding(int ID);
+    bool FlightTakeoffAndLanding(int ID);
 
 private:
     ControlMode controlMode;
@@ -94,4 +94,21 @@ private:
 
 private:
     static ControlModeManager* singleton;
+
+    bool MotorStartedCheck();
+    bool TakeOffInAirCheck();
+    bool TakeoffFinishedCheck();
+    
+    // 检查降落是否完成
+    bool LandFinishedCheck();
+    
+    // 检查动作是否开始
+    bool CheckActionStarted(E_DjiFcSubscriptionDisplayMode mode);
+
+    std::thread controlThread;
+    std::atomic<bool> isControlling;  // 使用原子变量确保线程安全
+    T_DjiFlightControllerJoystickCommand currentCommand;  // 这个变量在控制循环中只读，不需要原子性
+
+    void controlLoop();
+    void stopControl();
 };
