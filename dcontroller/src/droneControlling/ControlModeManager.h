@@ -42,7 +42,7 @@ public:
     // 飞行控制相关函数
     void FlightControl_VelocityControl(T_DjiFlightControllerJoystickCommand command);
     void FlightControl_setPitchAndYaw(T_DjiFlightControllerJoystickCommand command);
-    void setForwardAcceleration(float acceleration, float maxSpeed, uint32_t durationMs);
+    void setForwardAcceleration(float acceleration, float maxSpeed = 5.0f, uint32_t durationMs = 10*1000);
     // 紧急制动相关函数
     void emergencyBrake();
     void hover();
@@ -53,7 +53,7 @@ public:
     void flyToTarget(const Waypoint &target, float speed = 2.0f, float arriveThresh = 1.0f);
     Waypoint getCurrentPosition();
     void cruisePath(float speed, float arriveThresh);
-    void goToTargetPoint(const Waypoint& target, float speed, float arriveThresh);
+    void goToTargetPoint(const Waypoint& target, float speed = 2.0f, float arriveThresh = 1.0f);
 
     // 设置路径点相关函数
     void saveWaypoint(const Waypoint& waypoint);

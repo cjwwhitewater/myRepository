@@ -921,55 +921,6 @@ double ControlModeManager::calcHeading(const Waypoint &p1, const Waypoint &p2)
   return std::atan2(y, x); // 范围[-pi, pi]
 }
 
-/// 飞行到目标点，速度和到达阈值可选，默认速度2米每秒，到达阈值1米。到达阈值指的是与目标点的距离小于该值时，认为到达目标点。
-void ControlModeManager::flyToTarget(const Waypoint &target, float speed, float arriveThresh)
-{
-  T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
-  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
-    return;
-  }
-
-  T_DjiFlightControllerJoystickMode joystickMode = {
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_VELOCITY_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_YAW_ANGLE_RATE_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_GROUND_COORDINATE,
-      DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE};
-  DjiFlightController_SetJoystickMode(joystickMode);
-
-  while (true)
-  {
-    Waypoint curr = getCurrentPosition();
-    double dist = calcDistance(curr, target);
-    if (dist < arriveThresh)
-    {
-      break;
-    }
-
-    T_DjiFlightControllerJoystickCommand cmd = {0};
-    double heading = calcHeading(curr, target);
-    cmd.x = speed * std::cos(heading);
-    cmd.y = speed * std::sin(heading);
-    double dAlt = target.altitude - curr.altitude;
-    double k_alt = 0.5;
-    double v_z = k_alt * dAlt;
-    const double maxVz = 2.0;
-    if (v_z > maxVz)
-      v_z = maxVz;
-    if (v_z < -maxVz)
-      v_z = -maxVz;
-    cmd.z = v_z;
-    cmd.yaw = 0.0f;
-
-    DjiFlightController_ExecuteJoystickAction(cmd);
-    s_osalHandler->TaskSleepMs(100);
-  }
-  // 任务结束，无论什么原因，都下发0速度悬停
-  T_DjiFlightControllerJoystickCommand stopCmd = {0};
-  DjiFlightController_ExecuteJoystickAction(stopCmd);
-}
 
 std::vector<Waypoint> getWaypoints(const Json::Value &instructionParameter)
 {
