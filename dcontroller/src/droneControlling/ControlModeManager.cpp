@@ -661,45 +661,178 @@ void ControlModeManager::FlightControl_setPitchAndYaw(T_DjiFlightControllerJoyst
     controlThread = std::thread(&ControlModeManager::controlLoop, this);
 }
 
-void ControlModeManager::setForwardAcceleration(float acceleration, float maxSpeed = 5.0f, uint32_t durationMs = 10 * 1000)
+void ControlModeManager::setForwardAcceleration(float acceleration, float maxSpeed, uint32_t durationMs)
 {
-  float speed = 0;
-  float dt = 0.05f; // 控制周期，单位：秒
-  uint32_t stepMs = dt * 1000;
-  uint32_t elapsed = 0;
+    // 限制加速度范围
+    if (acceleration > 0.5f) {
+        acceleration = 0.5f;
+        USER_LOG_INFO("Acceleration exceeds upper limit, set to 0.5");
+    } else if (acceleration < -0.5f) {
+        acceleration = -0.5f;
+        USER_LOG_INFO("Acceleration exceeds lower limit, set to -0.5");
+    }
 
-  T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
-  if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-  {
-    USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
-    return;
-  }
-  s_osalHandler->TaskSleepMs(1000);
+    // 停止之前的控制
+    stopControl();
 
-  // 设置为速度控制模式
-  T_DjiFlightControllerJoystickMode joystickMode = {
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_VELOCITY_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_YAW_ANGLE_RATE_CONTROL_MODE,
-      DJI_FLIGHT_CONTROLLER_HORIZONTAL_BODY_COORDINATE,
-      DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE,
-  };
-  DjiFlightController_SetJoystickMode(joystickMode);
+    // 设置新的控制参数
+    std::lock_guard<std::mutex> lock(controlMutex);
+    accelerationControl.acceleration = acceleration;
+    accelerationControl.maxSpeed = maxSpeed;
+    accelerationControl.durationMs = durationMs;
+    accelerationControl.elapsedMs = 0;
+    accelerationControl.isAccelerating = true;
 
-  while (elapsed < durationMs)
-  {
-    speed += acceleration * dt;
-    if (speed >= maxSpeed)
-      speed = maxSpeed;
+    // 获取控制权限
+    T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+    {
+        USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
+        return;
+    }
+    s_osalHandler->TaskSleepMs(1000);
 
-    T_DjiFlightControllerJoystickCommand cmd = {0};
-    cmd.x = speed; // 向前速度
-    DjiFlightController_ExecuteJoystickAction(cmd);
+    // 设置为速度控制模式
+    T_DjiFlightControllerJoystickMode joystickMode = {
+        DJI_FLIGHT_CONTROLLER_HORIZONTAL_VELOCITY_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_YAW_ANGLE_RATE_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_HORIZONTAL_BODY_COORDINATE,
+        DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE,
+    };
+    DjiFlightController_SetJoystickMode(joystickMode);
 
-    s_osalHandler->TaskSleepMs(stepMs);
-    elapsed += stepMs;
-  }
-  // 达到最大速度后保持最大速度前进
+    // 启动新的控制线程
+    if (controlThread.joinable()) {
+        controlThread.join();
+    }
+    controlThread = std::thread(&ControlModeManager::accelerationControlLoop, this);
+}
+
+void ControlModeManager::flyToTarget(const Waypoint &target, float speed, float arriveThresh)
+{
+    // 停止之前的控制
+    stopControl();
+
+    // 设置新的控制参数
+    std::lock_guard<std::mutex> lock(controlMutex);
+    positionControl.target = target;
+    positionControl.speed = speed;
+    positionControl.arriveThresh = arriveThresh;
+    positionControl.isFlying = true;
+
+    // 获取控制权限
+    T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
+    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+    {
+        USER_LOG_ERROR("Obtain joystick authority failed, error code: 0x%08X", returnCode);
+        return;
+    }
+
+    // 设置为位置控制模式
+    T_DjiFlightControllerJoystickMode joystickMode = {
+        DJI_FLIGHT_CONTROLLER_HORIZONTAL_VELOCITY_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_VERTICAL_VELOCITY_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_YAW_ANGLE_RATE_CONTROL_MODE,
+        DJI_FLIGHT_CONTROLLER_HORIZONTAL_GROUND_COORDINATE,
+        DJI_FLIGHT_CONTROLLER_STABLE_CONTROL_MODE_ENABLE
+    };
+    DjiFlightController_SetJoystickMode(joystickMode);
+
+    // 启动新的控制线程
+    if (controlThread.joinable()) {
+        controlThread.join();
+    }
+    controlThread = std::thread(&ControlModeManager::positionControlLoop, this);
+}
+
+void ControlModeManager::accelerationControlLoop()
+{
+    USER_LOG_INFO("Acceleration control loop started");
+    float speed = 0;
+    float dt = 0.05f; // 控制周期，单位：秒
+    uint32_t stepMs = 20;  // 修改为20ms，实现50Hz的控制频率
+
+    while (accelerationControl.isAccelerating)
+    {
+        std::lock_guard<std::mutex> lock(controlMutex);
+        if (accelerationControl.elapsedMs >= accelerationControl.durationMs)
+        {
+            break;
+        }
+
+        speed += accelerationControl.acceleration * dt;
+        if (speed >= accelerationControl.maxSpeed)
+            speed = accelerationControl.maxSpeed;
+
+        T_DjiFlightControllerJoystickCommand cmd = {0};
+        cmd.x = speed; // 向前速度
+        T_DjiReturnCode returnCode = DjiFlightController_ExecuteJoystickAction(cmd);
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+        {
+            USER_LOG_ERROR("Execute joystick command failed, errno = 0x%08llX", returnCode);
+            break;
+        }
+
+        accelerationControl.elapsedMs += stepMs;
+        s_osalHandler->TaskSleepMs(stepMs);
+    }
+
+    // 达到最大速度后保持最大速度前进
+    if (accelerationControl.isAccelerating)
+    {
+        T_DjiFlightControllerJoystickCommand cmd = {0};
+        cmd.x = accelerationControl.maxSpeed;
+        DjiFlightController_ExecuteJoystickAction(cmd);
+    }
+
+    accelerationControl.isAccelerating = false;
+    USER_LOG_INFO("Acceleration control loop stopped");
+}
+
+void ControlModeManager::positionControlLoop()
+{
+    USER_LOG_INFO("Position control loop started");
+    while (positionControl.isFlying)
+    {
+        Waypoint curr = getCurrentPosition();
+        double dist = calcDistance(curr, positionControl.target);
+        
+        if (dist < positionControl.arriveThresh)
+        {
+            break;
+        }
+
+        T_DjiFlightControllerJoystickCommand cmd = {0};
+        double heading = calcHeading(curr, positionControl.target);
+        cmd.x = positionControl.speed * std::cos(heading);
+        cmd.y = positionControl.speed * std::sin(heading);
+        double dAlt = positionControl.target.altitude - curr.altitude;
+        double k_alt = 0.5;
+        double v_z = k_alt * dAlt;
+        const double maxVz = 2.0;
+        if (v_z > maxVz)
+            v_z = maxVz;
+        if (v_z < -maxVz)
+            v_z = -maxVz;
+        cmd.z = v_z;
+        cmd.yaw = 0.0f;
+
+        T_DjiReturnCode returnCode = DjiFlightController_ExecuteJoystickAction(cmd);
+        if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
+        {
+            USER_LOG_ERROR("Execute joystick command failed, errno = 0x%08llX", returnCode);
+            break;
+        }
+
+        s_osalHandler->TaskSleepMs(20);  // 修改为20ms，实现50Hz的控制频率
+    }
+
+    // 任务结束，无论什么原因，都下发0速度悬停
+    T_DjiFlightControllerJoystickCommand stopCmd = {0};
+    DjiFlightController_ExecuteJoystickAction(stopCmd);
+    positionControl.isFlying = false;
+    USER_LOG_INFO("Position control loop stopped");
 }
 
 void ControlModeManager::emergencyBrake() // 急停，优先级高
@@ -789,7 +922,7 @@ double ControlModeManager::calcHeading(const Waypoint &p1, const Waypoint &p2)
 }
 
 /// 飞行到目标点，速度和到达阈值可选，默认速度2米每秒，到达阈值1米。到达阈值指的是与目标点的距离小于该值时，认为到达目标点。
-void ControlModeManager::flyToTarget(const Waypoint &target, float speed = 2.0f, float arriveThresh = 1.0f)
+void ControlModeManager::flyToTarget(const Waypoint &target, float speed, float arriveThresh)
 {
   T_DjiReturnCode returnCode = DjiFlightController_ObtainJoystickCtrlAuthority();
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
@@ -992,8 +1125,8 @@ void ControlModeManager::processInstruction(const Json::Value &instructionData)
     float maxSpeed = instructionData["instructionParameter"]["maxSpeed"].asFloat();
     if (acceleration > 0.5f)
       acceleration = 0.5f;
-    if (acceleration < 0.0f)
-      acceleration = 0.0f; // 限制加速度范围
+    if (acceleration < -0.5f)
+      acceleration = -0.5f; // 限制加速度范围
 
     setForwardAcceleration(acceleration, maxSpeed);
     break;
@@ -1212,7 +1345,6 @@ const Waypoint &ControlModeManager::getHomePoint() const
 {
   return homePoint;
 }
-
 void ControlModeManager::controlLoop()
 {
     USER_LOG_INFO("Control loop started");
@@ -1224,21 +1356,20 @@ void ControlModeManager::controlLoop()
             isControlling = false;
             return;
         }
-        s_osalHandler->TaskSleepMs(2);
+        s_osalHandler->TaskSleepMs(20);  // 修改为20ms，实现50Hz的控制频率
     }
     USER_LOG_INFO("Control loop stopped");
 }
 
 void ControlModeManager::stopControl()
 {
-    if (!isControlling) {
-        return;  // 如果已经停止，直接返回
-    }
-    
-    USER_LOG_INFO("Stopping control loop");
+    std::lock_guard<std::mutex> lock(controlMutex);
     isControlling = false;
+    accelerationControl.isAccelerating = false;
+    positionControl.isFlying = false;
+    
     if (controlThread.joinable()) {
         controlThread.join();
     }
-    USER_LOG_INFO("Control loop stopped");
 }
+

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 using std::string;
 
@@ -49,7 +50,7 @@ public:
     double calcDistance(const Waypoint &p1, const Waypoint &p2);
     double calcHeading(const Waypoint &p1, const Waypoint &p2);
     // 巡航路径相关函数
-    void flyToTarget(const Waypoint &target, float speed, float arriveThresh);
+    void flyToTarget(const Waypoint &target, float speed = 2.0f, float arriveThresh = 1.0f);
     Waypoint getCurrentPosition();
     void cruisePath(float speed, float arriveThresh);
     void goToTargetPoint(const Waypoint& target, float speed, float arriveThresh);
@@ -108,7 +109,26 @@ private:
     std::thread controlThread;
     std::atomic<bool> isControlling;  // 使用原子变量确保线程安全
     T_DjiFlightControllerJoystickCommand currentCommand;  // 这个变量在控制循环中只读，不需要原子性
+    std::mutex controlMutex;
+
+    // 新增成员变量
+    struct {
+        float acceleration = 0.0f;
+        float maxSpeed = 5.0f;
+        uint32_t durationMs = 0;
+        uint32_t elapsedMs = 0;
+        bool isAccelerating = false;
+    } accelerationControl;
+
+    struct {
+        Waypoint target;
+        float speed = 2.0f;
+        float arriveThresh = 1.0f;
+        bool isFlying = false;
+    } positionControl;
 
     void controlLoop();
     void stopControl();
+    void accelerationControlLoop();
+    void positionControlLoop();
 };
