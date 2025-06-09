@@ -665,8 +665,7 @@ void DjiTest_FlightControlSetGetParamSample()
     E_DjiFlightControllerObstacleAvoidanceEnableStatus upwardsVisualObstacleAvoidanceStatus;
     E_DjiFlightControllerObstacleAvoidanceEnableStatus upwardsRadarObstacleAvoidanceStatus;
     E_DjiFlightControllerObstacleAvoidanceEnableStatus downloadsVisualObstacleAvoidanceStatus;
-    E_DjiFlightControllerGoHomeAltitude goHomeAltitude;
-    E_DjiFlightControllerRtkPositionEnableStatus rtkEnableStatus;
+    E_DjiFlightControllerGoHomeAltitude goHomeAltitude;    
     E_DjiFlightControllerRCLostAction rcLostAction;
     T_DjiAircraftInfoBaseInfo aircraftInfoBaseInfo;
     uint16_t countryCode;
@@ -838,26 +837,6 @@ void DjiTest_FlightControlSetGetParamSample()
     }
     USER_LOG_INFO("Current go home altitude is %d m\r\n", goHomeAltitude);
     s_osalHandler->TaskSleepMs(2000);
-
-    /*! Set rtk enable */
-    USER_LOG_INFO("--> Step 13: Set rtk enable status");
-    DjiTest_WidgetLogAppend("--> Step 13: Set rtk enable status");
-    returnCode = DjiFlightController_SetRtkPositionEnableStatus(DJI_FLIGHT_CONTROLLER_ENABLE_RTK_POSITION);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("Set rtk enable failed, error code: 0x%08X", returnCode);
-        goto out;
-    }
-    s_osalHandler->TaskSleepMs(1000);
-
-    USER_LOG_INFO("--> Step 14: Get rtk enable status\r\n");
-    DjiTest_WidgetLogAppend("--> Step 14: Get rtk enable status\r\n");
-    returnCode = DjiFlightController_GetRtkPositionEnableStatus(&rtkEnableStatus);
-    if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
-        USER_LOG_ERROR("Get rtk enable failed, error code: 0x%08X", returnCode);
-        goto out;
-    }
-    USER_LOG_INFO("Current rtk enable status is %d\r\n", rtkEnableStatus);
-    s_osalHandler->TaskSleepMs(1000);
 
     /*! Set rc lost action */
     if (aircraftInfoBaseInfo.aircraftType != DJI_AIRCRAFT_TYPE_M300_RTK &&

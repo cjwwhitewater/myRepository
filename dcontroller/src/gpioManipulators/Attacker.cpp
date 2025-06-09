@@ -28,7 +28,9 @@ void Attacker::singleShot()
 
 void Attacker::multipleShots()
 {
-    for (int i=0; i<500; i++){
+    options::Options& ops = options::OptionsInstance::get();
+    int shotTimes = ops.getInt("shotTimesInMultipleShotsMode", 5);
+    for (int i=0; i<shotTimes; i++){
         gpioWrite(pinNumber, 1);
         millisecond_delay(1000);
         gpioWrite(pinNumber, 0);

@@ -1,7 +1,7 @@
 #pragma once
 #include "nanotimer.h"
 
-class HeartBeatProcessor{
+class HeartBeatProcessor {
 public:
     void updateHeartBeatTimeStamp();
     bool lastHeartBeatIsFresh();

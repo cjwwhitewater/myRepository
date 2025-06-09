@@ -1,6 +1,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cassert>
+#include "nanotimer.h"
 #include "options.h"
 #include "FanController.h"
 #include <jetgpio.h>
@@ -12,8 +13,7 @@ FanController::FanController()
 {
     // Initialize the GPIO port.
     gpioSetMode(pinNumber, JET_OUTPUT);
-    // 额外常量
-    gpioSetPWMfrequency(pinNumber, 50);   // in Hz
+    gpioSetPWMfrequency(pinNumber, 500);   // in Hz
 }
 
 FanController::~FanController()
@@ -24,7 +24,10 @@ FanController::~FanController()
 void FanController::setGear(int gear)
 {
     std::clamp(gear, 0, 4);
-    int duty = gear * 255 / 4;
+    // The following mapping from the gear to the duty is earier for
+    // human visualization than a linear mapping one.
+    int mapper[5]={0, 24, 30, 40, 255};
+    int duty = mapper[gear];
     gpioPWM(pinNumber, duty);
 }
 

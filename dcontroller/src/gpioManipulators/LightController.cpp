@@ -5,6 +5,7 @@
 #include "LightController.h"
 #include <jetgpio.h>
 #include <unistd.h>
+#include "nanotimer.h"
 
 using namespace std;
 
@@ -23,7 +24,10 @@ LightController::~LightController()
 void LightController::setBrightness(int brightness)
 {
     std::clamp(brightness, 0, 4);
-    int duty = brightness * 255 / 4;
+    // The following mapping from the brightness to the duty is better than a
+    // linear mapping one.
+    int mapper[5] = {0, 32, 64, 128, 255};
+    int duty = mapper[brightness];
     gpioPWM(pinNumber, duty);
 }
 

@@ -1,5 +1,8 @@
 #include <iostream>
 #include <set>
+#include <string>
+#include <asio.hpp>
+#include <asio/deadline_timer.hpp>
 #include <jsoncpp/json/json.h>
 #include <boost/date_time.hpp>
 #include <jetgpio.h>
@@ -13,20 +16,27 @@
 #include "gpioManipulators/FanController.h"
 #include "gpioManipulators/LightController.h"
 #include "PSDKInitialization/PSDKInitializer.h"
-#include "cameraControlling/cameraControlling.h"
-#include "cameraControlling/GimbalDriver.h"
+#include "ptzControlling/GimbalDriver.h"
+#include "ptzControlling/FocalLengthController.h"
+#include "videoProcessing/videoReading/VideoReader.h"
+#include "videoProcessing/rtspPresenting/RTSPPresenter.h"
+#include "safetyChecking/SafetyChecker.h"
+#include "droneControlling/DroneStatusQuerier.h"
 
 using namespace std;
 
 // This function distributes instructions received by the vcontroller.
-void setupETTServer(ETTServer &server)
+void setupETTServer(ETTServer& server)
 {
     server.registerConnectionProcessor(
-        [](const string &remoteIP, shared_ptr<Packager> packager)
-        {
-            cout << "established an ETT connection for remove IP:" << remoteIP << endl;
-            packager->registerTextProcessor([packager](const string &text)
-                                            {
+                [](const string& remoteIP, shared_ptr<Packager> packager){
+        cout << "established an ETT connection for remove IP:"
+             << remoteIP << endl;
+
+        // Let the SafetyChecker to record this pointer.
+        SafetyChecker::get()->setETTPackager(packager);
+
+        packager->registerTextProcessor( [packager](const string& text){
             options::Options& ops = options::OptionsInstance::get();
             // parse the text.
             Json::Reader reader;
@@ -35,7 +45,8 @@ void setupETTServer(ETTServer &server)
 
             // heart beat processing
             if (instructionData["essentialTextType"].asString() == "heatbeat"){
-                HeartBeatProcessor* heartBeatProcessor = HeartBeatProcessor::get();
+                HeartBeatProcessor* heartBeatProcessor =
+                        HeartBeatProcessor::get();
                 heartBeatProcessor->updateHeartBeatTimeStamp();
                 return;
             }
@@ -57,141 +68,114 @@ void setupETTServer(ETTServer &server)
                 return;
             }
 
-            // process camera PTZ control instructions
+            // process gimbal control and zoom instructions
             if (ops.presents("cameraPresents")){
-                set<string> ptzControlInstructions={"D16", "D17", "D18"};
-                if (ptzControlInstructions.count(instructionID)){
-                    processPTZControlInstruction(instructionData);
+                if ( instructionID == "D16"){   // camera focal length
+                    int focalLength =
+                            instructionData["instructionParameter"].asInt();
+                    FocalLengthController::get()->setFocalLength(focalLength);
+                    return;
+                }
+                if ( instructionID == "D17"){   // gimbal pitch control
+                    int pitch = instructionData["instructionParameter"].asInt();
+                    GimbalDriver::get()->setGimbalPitch(pitch);
+                    return;
+                }
+                if ( instructionID == "D18"){   // gimbal yaw control
+                    int yaw = instructionData["instructionParameter"].asInt();
+                    GimbalDriver::get()->setGimbalYaw(yaw);
                     return;
                 }
             }
 
-            // Instruction D19 and D20 are processed by the ibox directly.
+            // Fan and light controlling.
+            if ( instructionID == "D27"){
+                FanController *fanController = FanController::get();
+                int gear = instructionData["instructionParameter"].asInt();
+                fanController->setGear(gear);
+                return;
+            }
+            if ( instructionID == "D28"){
+                LightController *lightController = LightController::get();
+                int brightness = instructionData["instructionParameter"].asInt();
+                lightController->setBrightness(brightness);
+                return;
+            }
 
             // Other instructions are related to drone control.
             ControlModeManager* controlModeManager = ControlModeManager::get();
             if (controlModeManager->canProcessInstruction(instructionID)){
                 controlModeManager->processInstruction(instructionData);
-            } });
-            packager->startRead();
+            }
+
+            // Instruction D19 and D20 are processed by the ibox directly.
+
         });
+        packager->startRead();
+    });
 
     server.start();
 }
 
-//// This function will be periodically called. Each time it is called, it informations
-//// the current controller to determine target speed/turning angle, and send those targets
-//// to the VehicleCommander.
-// void performUGVControlling(const asio::error_code& /*e*/,
-//                            asio::deadline_timer* timer,
-//                            boost::posix_time::milliseconds* interval)
-//{
-//     HeartBeatProcessor* heartBeatProcessor = HeartBeatProcessor::get();
-//     if ( heartBeatProcessor->lastHeartBeatIsFresh()){
-//         ControlModeManager* controlModeManager = ControlModeManager::get();
-//         VehicleCommander* vehicleCommander = VehicleCommander::get();
-//         double targetSpeed=0, targetAngle=0;
-//         controlModeManager->determineTagetSpeedAndAngle(targetSpeed, targetAngle);
-//         vehicleCommander->setSpeedAndAngle(targetSpeed, targetAngle);
-//     }
+// This function will be periodically called. Each time it is called, it informs
+// the current controller to determine a JoystickCommand, and send the command
+// to the InstantCommandExecuter.
+void performDroneControlling(const asio::error_code& /*ec*/,
+                             asio::deadline_timer* timer,
+                             boost::posix_time::milliseconds* interval)
+{
+    HeartBeatProcessor* heartBeatProcessor = HeartBeatProcessor::get();
+    if ( heartBeatProcessor->lastHeartBeatIsFresh()){
+        ControlModeManager::get()->executeTimerTask();
+    }
 
-//    // repeat this timer
-//    timer->expires_at(timer->expires_at() + *interval);
-//    timer->async_wait(std::bind(performUGVControlling,
-//                                std::placeholders::_1, timer,
-//                                interval) );
-//}
+    // repeat this timer
+    timer->expires_at(timer->expires_at() + *interval);
+    timer->async_wait(std::bind(performDroneControlling,
+                                std::placeholders::_1, timer,
+                                interval) );
+}
 
-//// This function reports status of UGV and PTZ camera.
-// void reportUGVAndPTZStatus(const asio::error_code& /*e*/,
-//                            asio::deadline_timer* timer,
-//                            boost::posix_time::milliseconds* interval,
-//                            MTPServer* mtpServer)
-//{
-//     // Basisc device status.
-//     VehicleCommander* ugv = VehicleCommander::get();
-//     ControlModeManager* controlModeManager = ControlModeManager::get();
-//     Json::Value status;
-//     static int statusID = 0;
-//     double voltage, velocity, angle;
-//     ugv->getStatus(voltage, velocity, angle);
-//     status["statusID"]         = statusID++;
-//     status["ugvEnabled"]       = controlModeManager->UGVEnabled()?1:0;
-//     status["ugvBattery"]       = voltage;
-//     status["ugvVelocity"]      = velocity;
-//     status["ugvSteeringAngle"] = angle;
+// This function reports status of drone and H30 camera.
+void reportDroneSideStatus(const asio::error_code& /*e*/,
+                           asio::deadline_timer* timer,
+                           boost::posix_time::milliseconds* interval,
+                           MTPServer* mtpServer)
+{
+    // Basisc device status.
+    Json::Value status;
+    static int statusID = 0;
+    status["statusID"] = statusID++;
 
-//    // The current UGV controller may append extra status information.
-//    controlModeManager->appendControllerStatus(status);
+    // Let each device/object report its status.
+    DroneStatusQuerier::get()->reportStatus(status);
+    GimbalDriver::get()->reportStatus(status);
+    FocalLengthController::get()->reportStatus(status);
+    ControlModeManager::get()->reportStatus(status);
 
-//    // Append PTZ status information.
-//    OnvifAgent* onvifAgent = OnvifAgent::get();
-//    float yaw, pitch, focalLength;
-//    if (onvifAgent->getUserSpacePTZ(yaw, pitch, focalLength)){
-//        status["cameraYaw"]         = (int)yaw;
-//        status["cameraPitch"]       = (int)pitch;
-//        status["cameraFocalLength"] = (int)focalLength;
-//    }
+    // send out the device status and soldier position.
+    if (mtpServer->isConnected())
+        mtpServer->writeMessage( MessageType::DeviceStatus,
+                                 status.toStyledString() );
 
-//    // send out the device status and soldier position.
-//    if (mtpServer->isConnected())
-//        mtpServer->writeMessage( MessageType::DeviceStatus,
-//                                 status.toStyledString() );
-
-//    // repeat this timer
-//    timer->expires_at(timer->expires_at() + *interval);
-//    timer->async_wait(std::bind(reportUGVAndPTZStatus,
-//                                std::placeholders::_1, timer,
-//                                interval, mtpServer) );
-//}
-
-//// This function will be periodically called. Each time it is called, it checks
-//// any possibly occlision with environmental obstacles.
-// void checkCollision(const asio::error_code& /*e*/,
-//                     asio::deadline_timer* timer,
-//                     boost::posix_time::milliseconds* interval)
-//{
-//     ControlModeManager* controlModeManager = ControlModeManager::get();
-//     SafetyChecker* safetyChecker = SafetyChecker::get();
-//     bool safeToDrive = safetyChecker->safeToDrive();
-//     if (!safeToDrive &&
-//         controlModeManager->getControlMode() != SoldierFollowingMode){
-//         // stop ugv
-//         ControlModeManager* controlModeManager = ControlModeManager::get();
-//         controlModeManager->emergencyStop();
-//     }
-
-//    // repeat this timer
-//    timer->expires_at(timer->expires_at() + *interval);
-//    timer->async_wait(std::bind(checkCollision,
-//                                std::placeholders::_1, timer,
-//                                interval) );
-//}
+    // repeat this timer
+    timer->expires_at(timer->expires_at() + *interval);
+    timer->async_wait(std::bind(reportDroneSideStatus,
+                                std::placeholders::_1, timer,
+                                interval, mtpServer) );
+}
 
 void destructSingletons()
 {
     delete GimbalDriver::get();
 }
 
-int main(int argc, char *argv[])
+void createSingletons()
 {
-    string applicationOptionsFilename = "config/application-config.txt";
-    cout << "to read config from: " << applicationOptionsFilename << "\n";
-    options::OptionsInstance instance(applicationOptionsFilename);
-    options::Options &ops = options::OptionsInstance::get();
+    HeartBeatProcessor::createInstance();
+    cout << "created an instance of HeartBeatProcessor" << endl;
 
-    if (initializePSDK(argc, argv) != 0)
-    {
-        cerr << "failed to initialize PSDK, exiting..." << endl;
-        return -1;
-    }
-
-    if (gpioInitialise() < 0)
-    {
-        cerr << "JETGPIO initialization failed!" << endl;
-        return -1;
-    }
-
+    // simple peripheral devices of onx.
     Attacker::createInstance();
     cout << "created an instance of Attacker" << endl;
 
@@ -201,35 +185,70 @@ int main(int argc, char *argv[])
     LightController::createInstance();
     cout << "created an instance of LightController" << endl;
 
-    HeartBeatProcessor::createInstance();
-    cout << "created an instance of HeartBeatProcessor" << endl;
-
-    ControlModeManager::createInstance();
-    cout << "created an instance of ControlModeManager" << endl;
-
-    ControlModeManager *manager = ControlModeManager::get();
-    T_DjiReturnCode ret = manager->initialize();
-    if (ret != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS)
-    {
-        USER_LOG_ERROR("Flight control initialization failed, error code: 0x%08llX", ret);
-        return -1;
-    }
-
+    // PTZ controlling related.
     GimbalDriver::createInstance();
     cout << "created an instance of GimbalDriver" << endl;
 
-    try
-    {
+    FocalLengthController::createInstance();
+    cout << "created an instance of FocalLengthController" << endl;
+
+    // flight control related.
+    DroneStatusQuerier::createInstance();
+    cout << "created an instance of DroneStatusQuerie" << endl;
+
+    InstantCommandExecuter::createInstance();
+    cout << "created an instance of InstantCommandExecuter" << endl;
+
+    ControlModeManager::createInstance();
+    cout << "created an instance of ControlModeManager" << endl;
+    ControlModeManager::get()->initialize();
+
+    SafetyChecker::createInstance();
+    cout << "created an instance of SafetyChecker" << endl;
+}
+
+int main(int argc, char* argv[])
+{
+    cout << "dcontroller version 2.2" << endl;
+    string applicationOptionsFilename = "config/dcontroller-config.txt";
+    cout << "to read config from: " << applicationOptionsFilename << "\n";
+    options::OptionsInstance instance( applicationOptionsFilename );
+    options::Options& ops = options::OptionsInstance::get();
+
+    if (initializePSDK(argc, argv) != 0){
+        cerr << "failed to initialize PSDK, exiting..." << endl;
+        return -1;
+    }
+
+    if (gpioInitialise() < 0) {
+        cerr << "JETGPIO initialization failed!" << endl;
+        return -1;
+    }
+
+    createSingletons();
+
+    RTSPPresenter rtspPresenter;
+    rtspPresenter.startRTSPServer();
+
+    // Start H30 H264 streaming and forward the stream data to RTSPPresenter.
+    VideoReader videoReader;
+    videoReader.setVideoDataProcessor(
+                [&rtspPresenter](const uint8_t*buf, uint32_t len){
+            rtspPresenter.publishVideoData(buf, len);
+    });
+    videoReader.startVideoStream();
+
+    try{
         // The kernel io_context for the main event loop.
-        // When the program is terminated by the Ctrl+C keyboard event, the 'stop'
-        // member function of this io_context is executed to terminate the event loop.
+        // When the program is terminated by the Ctrl+C keyboard event,
+        // the 'stop' member function of this io_context is executed to
+        // terminate the event loop.
         asio::io_context ioContext;
 
         // Set processor for Ctrl+C signal triggered by user.
         asio::signal_set signals(ioContext, SIGINT, SIGTERM);
         signals.async_wait(
-            [&](std::error_code /*ec*/, int /*signo*/)
-            {
+            [&](std::error_code /*ec*/, int /*signo*/) {
                 ioContext.stop();
                 gpioTerminate();
                 destructSingletons();
@@ -243,32 +262,23 @@ int main(int argc, char *argv[])
         // Create and setup an MTP server
         MTPServer mtpServer(ioContext, ops.getInt("MTPServerPort", 20000));
 
-        //        // Setup a periodical timer to report device status(including soldier position)
-        //        boost::posix_time::milliseconds intervalA(200);
-        //        asio::deadline_timer deviceStatusReportTimer(ioContext, intervalA);
-        //        deviceStatusReportTimer.async_wait( std::bind(reportUGVAndPTZStatus,
-        //                                    std::placeholders::_1,
-        //                                    &deviceStatusReportTimer, &intervalA,
-        //                                    &mtpServer) );
+        // Setup a periodical timer to report device status
+        boost::posix_time::milliseconds intervalA(200);
+        asio::deadline_timer timerA(ioContext, intervalA);
+        timerA.async_wait( std::bind(reportDroneSideStatus,
+                                    std::placeholders::_1,
+                                    &timerA, &intervalA,
+                                    &mtpServer) );
 
-        //        // Setup another periodical timer for performing various controlling.
-        //        boost::posix_time::milliseconds intervalB(50);
-        //        asio::deadline_timer ifTimer(ioContext, intervalB);
-        //        ifTimer.async_wait( std::bind(performUGVControlling,
-        //                                    std::placeholders::_1,
-        //                                    &ifTimer, &intervalB) );
-
-        //        // Setup another periodical timer for collision checking
-        //        boost::posix_time::milliseconds intervalC(200);
-        //        asio::deadline_timer collisionTimer(ioContext, intervalC);
-        //        collisionTimer.async_wait( std::bind(checkCollision,
-        //                                       std::placeholders::_1,
-        //                                       &collisionTimer, &intervalC) );
+        // Setup another periodical timer for performing various controlling.
+        boost::posix_time::milliseconds intervalB(50);
+        asio::deadline_timer timerB(ioContext, intervalB);
+        timerB.async_wait( std::bind(performDroneControlling,
+                                    std::placeholders::_1,
+                                    &timerB, &intervalB) );
 
         ioContext.run();
-    }
-    catch (std::exception &e)
-    {
+    }catch (std::exception& e){
         std::cerr << "Exception: " << e.what() << "\n";
     }
 
